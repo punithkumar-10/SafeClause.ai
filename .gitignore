@@ -1,0 +1,89 @@
+# -----------------------------
+# Python
+# -----------------------------
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+pip-wheel-metadata/
+*.whl
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+*.env
+
+# Byte-compiled
+*.log
+
+# -----------------------------
+# Jupyter Notebook
+# -----------------------------
+.ipynb_checkpoints/
+*.ipynb
+
+# -----------------------------
+# Testing
+# -----------------------------
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# -----------------------------
+# IDE / Editor Files
+# -----------------------------
+
+# VS Code
+.vscode/
+.code-workspace
+
+# PyCharm
+.idea/
+
+# -----------------------------
+# OS Files
+# -----------------------------
+.DS_Store
+Thumbs.db
+
+# -----------------------------
+# Environment / Secrets
+# -----------------------------
+*.env
+.env.*
+*.key
+*.pem
+
+# -----------------------------
+# Cache
+# -----------------------------
+.cache/
+.mypy_cache/
+__pypackages__/
+
+# -----------------------------
+# Local configs
+# -----------------------------
+*.local
+*.config
+
+# -----------------------------
+# LlamaIndex / Embedding data
+# -----------------------------
+storage/
+index_store/
+cache.json
+
+# -----------------------------
+# FastAPI / Streamlit
+# -----------------------------
+*.db
+*.sqlite

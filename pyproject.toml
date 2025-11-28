@@ -1,0 +1,13 @@
+[project]
+name = "safeclause-ai"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "langchain>=1.1.0",
+    "langchain-community>=0.4.1",
+    "langchain-pinecone>=0.2.13",
+    "pinecone>=7.3.0",
+    "pypdf>=6.4.0",
+]
