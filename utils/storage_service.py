@@ -7,7 +7,7 @@ from typing import List, Tuple
 
 logger = logging.getLogger(__name__)
 
-os.loadenv()
+os.load_dotenv()
 
 access_key = os.getenv("STORJ_ACCESS_KEY")
 secret_key = os.getenv("STORJ_SECRET_KEY")
