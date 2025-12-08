@@ -1,4 +1,3 @@
-# agent.py
 import logging
 from typing import Annotated
 import operator
@@ -10,7 +9,7 @@ from langgraph.graph import StateGraph, START, END
 from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.memory import MemorySaver
 from langchain.tools import tool
-from langchain.messages import HumanMessage
+from langchain.messages import HumanMessage, trim_messages
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from pinecone import Pinecone
@@ -32,6 +31,10 @@ PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
 AWS_ACCESS_KEY = os.getenv("AWS_ACCESS_KEY")
 AWS_SECRET_KEY = os.getenv("AWS_SECRET_KEY")
+
+# context management
+MAX_MESSAGES_TO_KEEP = 5  
+MAX_TOKENS_PER_MESSAGE = 100000
 
 
 class Section(BaseModel):
@@ -57,13 +60,29 @@ class WorkerState(TypedDict):
     completed_sections: Annotated[list, operator.add]
 
 
-orchestration_model = ChatOpenAI(model_name="gpt-5-mini", api_key=OPENAI_API_KEY)
-model = ChatOpenAI(model_name="gpt-5-nano", api_key=OPENAI_API_KEY)
+orchestration_model = ChatOpenAI(model_name="gpt-4o-mini", api_key=OPENAI_API_KEY)
+model = ChatOpenAI(model_name="gpt-4o-mini", api_key=OPENAI_API_KEY)
 
 MCP_TOOLS = []
 MCP_CLIENT = None
 TEXT_SPLITTER = None
 GRAPH = None
+
+
+def trim_message_history(messages: list) -> list:
+    """
+    Trim message history to prevent context length exceeded errors.
+    Keeps only the last MAX_MESSAGES_TO_KEEP messages.
+    """
+    if not messages:
+        return messages
+    
+    # Keep only the last N messages
+    if len(messages) > MAX_MESSAGES_TO_KEEP:
+        logger.info(f"Trimming messages from {len(messages)} to {MAX_MESSAGES_TO_KEEP}")
+        return messages[-MAX_MESSAGES_TO_KEEP:]
+    
+    return messages
 
 
 def get_text_splitter():
@@ -91,7 +110,6 @@ async def retrieve_relevant_documents(query: str):
 async def download_and_parse_document(state: State):
     session_id = state.get("session_id", "default")
     
-    # Check if documents already exist in state
     if state.get("doc_contents") and len(state["doc_contents"]) > 0:
         return {
             "has_documents": True,
@@ -114,7 +132,6 @@ async def download_and_parse_document(state: State):
         secret_key = AWS_SECRET_KEY
         auth = AWS4Auth(access_key, secret_key, 'us-east-1', 's3')
         
-        # Process each file
         for doc_filepath in doc_filepaths:
             try:
                 logger.info(f"Processing document: {doc_filepath}")
@@ -225,7 +242,7 @@ The name which i have to this chatbot is "SafeClause.ai"
 3. Case Law — landmark or recent rulings (if relevant).
 4. Practical Notes — procedures, remedies, compliance steps.
 5. Disclaimer:
-   “Information is for educational purposes and not professional legal advice.”
+   "Information is for educational purposes and not professional legal advice."
 
 ──────── IMPORTANT BEHAVIOR ────────
 • Never over-lawyer simple questions.
@@ -235,7 +252,10 @@ The name which i have to this chatbot is "SafeClause.ai"
 """
     )
     
+    # Trim messages to prevent context overflow
     messages = state.get("messages", [])
+    messages = trim_message_history(messages)
+    
     if not messages:
         messages = [{"role": "user", "content": state['query']}]
     else:
@@ -258,6 +278,7 @@ async def route_after_orchestration(state: State) -> Literal["chunk_document", "
     if state.get("completed_sections") and len(state["completed_sections"]) > 0:
         return "answer_from_cache"
     return "chunk_document"
+
 
 async def answer_from_cache(state: State):
     cached_sections = state.get("completed_sections", [])
@@ -292,11 +313,14 @@ Answer the user's question based on the provided document analysis. You can also
 1. **Direct Answer:** A concise summary of the legal position.
 2. **Legal Provisions:** Cite specific Acts and Sections (e.g., "Section 302 IPC / Section 103 BNS").
 3. **Case Laws:** Mention relevant landmark cases (from VectorDB) and recent rulings (from WebSearch).
-4. **Disclaimer:** "Information is for educational purposes and not professional legal advice.
+4. **Disclaimer:** "Information is for educational purposes and not professional legal advice."
     """
     )
     
+
     messages = state.get("messages", [])
+    messages = trim_message_history(messages)
+    
     prompt_content = f"Documents analyzed:\n{doc_info}\n\nDocument Analysis:\n{combined_context}\n\nUser Question: {state['query']}"
     
     if not messages:
@@ -329,6 +353,7 @@ async def chunk_document(state: State):
             )
     
     return {"chunks": chunks}
+
 
 async def analyze_chunk(state: WorkerState):
     all_tools = [retrieve_relevant_documents]
@@ -390,7 +415,7 @@ For *each* section provided in the input, you must generate a structured assessm
 2.  **Risk Assessment:**
     - **Risk Score:** Assign a score from 1 (Safe) to 10 (Critical Risk).
     - **Justification:** Briefly explain *why* this score was assigned.
-3.  **Detailed Analysis:** Synthesize the legal implications, referencing the provided analyses.
+3.  Detailed Analysis:** Synthesize the legal implications, referencing the provided analyses.
 4.  **Strategic Suggestions:** Provide specific, actionable advice on how to mitigate the identified risks.
 5.  **Refined Clause (Redline):** Rewrite the section to be legally watertight, protecting the user's interest while maintaining the original intent.
 
@@ -408,11 +433,13 @@ At the end of the report, provide an **Overall Document Risk Score** (Average) a
 
 
 async def build_graph():
+    """Build and compile the LangGraph graph."""
     global MCP_TOOLS, GRAPH
     
     MCP_TOOLS = await setup_mcp_client()
     
     builder = StateGraph(State)
+    
     builder.add_node("download_and_parse_document", download_and_parse_document)
     builder.add_node("orchestration_agent", orchestration_agent)
     builder.add_node("answer_from_cache", answer_from_cache)
@@ -426,18 +453,48 @@ async def build_graph():
     builder.add_conditional_edges(
         "orchestration_agent",
         route_after_orchestration,
-        {"chunk_document": "chunk_document", "answer_from_cache": "answer_from_cache", "END": END}
+        {
+            "chunk_document": "chunk_document",
+            "answer_from_cache": "answer_from_cache",
+            "END": END
+        }
     )
     
     builder.add_edge("answer_from_cache", END)
-    builder.add_conditional_edges("chunk_document", assign_workers, ["analyze_chunk"])
+
+    builder.add_conditional_edges(
+        "chunk_document",
+        assign_workers,
+        ["analyze_chunk"]
+    )
+    
     builder.add_edge("analyze_chunk", "synthesizer")
     builder.add_edge("synthesizer", END)
 
     checkpointer = MemorySaver()
     GRAPH = builder.compile(checkpointer=checkpointer)
+    logger.info("Graph compiled successfully")
 
 
 def get_graph():
     """Get the compiled graph."""
     return GRAPH
+
+
+async def stream_graph_updates(input_state: State, config: dict, stream_mode: str = "updates"):
+    """
+    Stream updates from the graph as they occur.
+    
+    Args:
+        input_state: Initial state for the graph
+        config: Configuration dict with thread_id for checkpointing
+        stream_mode: One of "updates", "values", or "messages"
+        
+    Yields:
+        Streamed chunks from the graph
+    """
+    if GRAPH is None:
+        await build_graph()
+    
+    async for chunk in GRAPH.astream(input_state, config, stream_mode=stream_mode):
+        yield chunk

@@ -1,8 +1,6 @@
-# main.py
 import logging
 import json
 import asyncio
-from typing import Optional
 from pydantic import BaseModel, Field
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
@@ -10,7 +8,7 @@ from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 from langchain.messages import HumanMessage
 
-from agent import build_graph, get_graph, State
+from agent import build_graph, get_graph, stream_graph_updates, State
 
 load_dotenv()
 
@@ -31,24 +29,43 @@ class HealthResponse(BaseModel):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """Initialize graph on startup."""
     await build_graph()
+    logger.info("Graph initialized on startup")
     yield
 
 
-app = FastAPI(title="Legal Document Analysis API", version="1.0.0", lifespan=lifespan)
+app = FastAPI(
+    title="Legal Document Analysis API",
+    version="1.0.0",
+    lifespan=lifespan
+)
 
 
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
-    return HealthResponse(status="healthy", message="Legal Document Analysis API is running")
+    """Health check endpoint."""
+    return HealthResponse(
+        status="healthy",
+        message="Legal Document Analysis API is running"
+    )
 
 
 @app.post("/query")
 async def query(request: QueryRequest):
+    """
+    Stream legal query analysis in real-time.
+    
+    Uses LangGraph astream() with stream_mode="updates" to yield
+    state changes after each node executes.
+    """
     try:
         GRAPH = get_graph()
         if not GRAPH:
-            raise HTTPException(status_code=500, detail="Graph not initialized")
+            raise HTTPException(
+                status_code=500,
+                detail="Graph not initialized"
+            )
         
         session_id = request.session_id
         config = {"configurable": {"thread_id": session_id}}
@@ -68,9 +85,13 @@ async def query(request: QueryRequest):
             previous_completed_sections = []
         
         new_user_message = HumanMessage(content=request.query)
+        
+        if len(previous_messages) > 3:
+            previous_messages = previous_messages[-3:]
+        
         all_messages = previous_messages + [new_user_message]
         
-        input_state = {
+        input_state: State = {
             "query": request.query,
             "session_id": session_id,
             "doc_filepaths": request.doc_filepaths,
@@ -82,24 +103,71 @@ async def query(request: QueryRequest):
             "messages": all_messages,
         }
         
-        result = await GRAPH.ainvoke(input_state, config)
-        
-        async def generate():
-            final_report = result.get("final_report", "")
-            for chunk in final_report.split('\n'):
-                if chunk.strip():
-                    yield json.dumps({"text": chunk}) + "\n"
-                    await asyncio.sleep(0.05)
-        
-        return StreamingResponse(generate(), media_type="application/x-ndjson")
+        return await stream_query_response(input_state, config)
     
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error: {str(e)}", exc_info=True)
-        async def error():
-            yield json.dumps({"error": str(e)}) + "\n"
-        return StreamingResponse(error(), media_type="application/x-ndjson")
+        logger.error(f"Error in /query endpoint: {str(e)}", exc_info=True)
+        async def error_generator():
+            yield json.dumps({"type": "error", "error": str(e)}) + "\n"
+        return StreamingResponse(error_generator(), media_type="application/x-ndjson")
+
+
+async def stream_query_response(input_state: State, config: dict):
+    """
+    Stream graph updates using astream with stream_mode="updates".
+    
+    Yields JSON events:
+    - report: Final analysis results
+    - complete: Stream completion signal
+    - error: Error notifications
+    """
+    async def event_generator():
+        try:
+            node_count = 0
+            final_report = ""
+            
+            async for chunk in stream_graph_updates(
+                input_state,
+                config,
+                stream_mode="updates"
+            ):
+                node_count += 1
+                
+                for node_name, state_updates in chunk.items():
+                    logger.info(f"Node {node_count}: {node_name}")
+                    
+                    if "final_report" in state_updates and state_updates["final_report"]:
+                        final_report = state_updates["final_report"]
+                        logger.info(f"Final report generated from {node_name}")
+                        yield json.dumps({
+                            "type": "report",
+                            "node": node_name,
+                            "content": final_report
+                        }) + "\n"
+            
+            yield json.dumps({
+                "type": "complete",
+                "message": "Query processing completed",
+                "total_nodes": node_count
+            }) + "\n"
+        
+        except Exception as e:
+            logger.error(f"Error in stream_query_response: {str(e)}", exc_info=True)
+            yield json.dumps({
+                "type": "error",
+                "error": str(e)
+            }) + "\n"
+    
+    return StreamingResponse(event_generator(), media_type="application/x-ndjson")
 
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=8000,
+        log_level="info"
+    )
