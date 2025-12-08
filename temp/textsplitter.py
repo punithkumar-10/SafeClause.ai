@@ -1,29 +1,3 @@
-# from langchain_community.document_loaders import PyPDFLoader
-# from langchain_text_splitters import RecursiveCharacterTextSplitter
-
-# # Step 1: Load PDF
-# loader = PyPDFLoader("SafeClause/Datasets/a1881-26.pdf")
-# pages = loader.load()
-
-# # Combine all pages into one string (optional)
-# full_text = "\n".join([p.page_content for p in pages])
-
-# # Step 2: Split the text
-# text_splitter = RecursiveCharacterTextSplitter(
-#     chunk_size=3000,
-#     chunk_overlap=400
-# )
-
-# chunks = text_splitter.split_text(full_text)
-
-# # Step 3: Print chunks
-# for i, chunk in enumerate(chunks, start=1):
-#     print(f"\n==== Chunk {i} ====\n")
-#     print(chunk)
-
-
-
-
 import os
 import json
 import uuid
