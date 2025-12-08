@@ -4,10 +4,11 @@ from requests_aws4auth import AWS4Auth
 import os
 import logging
 from typing import List, Tuple
+from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
 
-os.load_dotenv()
+load_dotenv()
 
 access_key = os.getenv("STORJ_ACCESS_KEY")
 secret_key = os.getenv("STORJ_SECRET_KEY")
