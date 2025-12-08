@@ -1,3 +1,4 @@
+# main.py
 import logging
 import json
 import asyncio
@@ -18,8 +19,8 @@ logger = logging.getLogger(__name__)
 
 
 class QueryRequest(BaseModel):
-    query: str = Field(None, description="User's legal query")
-    doc_filepath: Optional[str] = Field(None, description="URL path to document")
+    query: str = Field(..., description="User's legal query")
+    doc_filepaths: list[str] = Field(default=[], description="List of S3 document URLs")
     session_id: str = Field(default="default_session", description="Session ID")
 
 
@@ -39,7 +40,7 @@ app = FastAPI(title="Legal Document Analysis API", version="1.0.0", lifespan=lif
 
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
-    return HealthResponse(status="healthy", message="SafeClause.ai is running!")
+    return HealthResponse(status="healthy", message="Legal Document Analysis API is running")
 
 
 @app.post("/query")
@@ -52,16 +53,17 @@ async def query(request: QueryRequest):
         session_id = request.session_id
         config = {"configurable": {"thread_id": session_id}}
         
+        # Retrieve previous state from checkpointer
         previous_state = GRAPH.get_state(config)
         
         if previous_state and previous_state.values:
             previous_messages = previous_state.values.get("messages", [])
-            previous_doc_content = previous_state.values.get("doc_content", "")
+            previous_doc_contents = previous_state.values.get("doc_contents", [])
             previous_chunks = previous_state.values.get("chunks", [])
             previous_completed_sections = previous_state.values.get("completed_sections", [])
         else:
             previous_messages = []
-            previous_doc_content = ""
+            previous_doc_contents = []
             previous_chunks = []
             previous_completed_sections = []
         
@@ -71,9 +73,9 @@ async def query(request: QueryRequest):
         input_state = {
             "query": request.query,
             "session_id": session_id,
-            "doc_filepath": request.doc_filepath or "",
-            "doc_content": previous_doc_content,
-            "has_document": bool(previous_doc_content.strip()) if previous_doc_content else False,
+            "doc_filepaths": request.doc_filepaths,
+            "doc_contents": previous_doc_contents,
+            "has_documents": len(previous_doc_contents) > 0,
             "chunks": previous_chunks,
             "completed_sections": previous_completed_sections,
             "final_report": "",

@@ -43,9 +43,9 @@ class Section(BaseModel):
 class State(TypedDict):
     query: str
     session_id: str
-    doc_filepath: str
-    doc_content: str
-    has_document: bool
+    doc_filepaths: list[str]  
+    doc_contents: list[dict]  
+    has_documents: bool  
     chunks: list[Section]
     completed_sections: Annotated[list, operator.add]
     final_report: str
@@ -91,64 +91,89 @@ async def retrieve_relevant_documents(query: str):
 async def download_and_parse_document(state: State):
     session_id = state.get("session_id", "default")
     
-    if state.get("doc_content") and len(state["doc_content"].strip()) > 0:
+    # Check if documents already exist in state
+    if state.get("doc_contents") and len(state["doc_contents"]) > 0:
         return {
-            "has_document": True,
-            "messages": [HumanMessage(content="Document already in memory")]
+            "has_documents": True,
+            "messages": [HumanMessage(content=f"Documents already in memory: {len(state['doc_contents'])} files")]
         }
     
-    doc_filepath = state.get("doc_filepath")
-    if not doc_filepath:
+    doc_filepaths = state.get("doc_filepaths", [])
+    if not doc_filepaths:
         return {
-            "doc_content": "",
-            "has_document": False,
-            "messages": [HumanMessage(content="No document filepath provided")]
+            "doc_contents": [],
+            "has_documents": False,
+            "messages": [HumanMessage(content="No documents provided")]
         }
+    
+    doc_contents = []
+    errors = []
     
     try:
         access_key = AWS_ACCESS_KEY
         secret_key = AWS_SECRET_KEY
         auth = AWS4Auth(access_key, secret_key, 'us-east-1', 's3')
         
-        response = requests.get(doc_filepath, auth=auth)
-        if response.status_code != 200:
-            return {
-                "doc_content": "",
-                "has_document": False,
-                "messages": [HumanMessage(content=f"Failed to download: {response.status_code}")]
-            }
-        
-        filename = doc_filepath.split('/')[-1]
-        temp_path = f"/tmp/{filename}"
-        with open(temp_path, 'wb') as f:
-            f.write(response.content)
-        
-        try:
-            all_text = await document_parser(temp_path)
+        # Process each file
+        for doc_filepath in doc_filepaths:
+            try:
+                logger.info(f"Processing document: {doc_filepath}")
+                
+                response = requests.get(doc_filepath, auth=auth)
+                if response.status_code != 200:
+                    errors.append(f"Failed to download {doc_filepath}: {response.status_code}")
+                    continue
+                
+                filename = doc_filepath.split('/')[-1]
+                temp_path = f"/tmp/{filename}"
+                with open(temp_path, 'wb') as f:
+                    f.write(response.content)
+                
+                try:
+                    all_text = await document_parser(temp_path)
+                    
+                    if all_text.strip():
+                        doc_contents.append({
+                            "filepath": doc_filepath,
+                            "filename": filename,
+                            "content": all_text
+                        })
+                        logger.info(f"✅ Parsed {filename}: {len(all_text)} characters")
+                    else:
+                        errors.append(f"No text extracted from {filename}")
+                finally:
+                    if os.path.exists(temp_path):
+                        os.remove(temp_path)
             
-            return {
-                "doc_content": all_text,
-                "has_document": True if all_text.strip() else False,
-                "messages": [HumanMessage(content="Document downloaded and parsed")]
-            }
-        finally:
-            if os.path.exists(temp_path):
-                os.remove(temp_path)
-    except Exception as e:
-        logger.error(f"Error downloading document: {str(e)}")
+            except Exception as e:
+                logger.error(f"Error processing {doc_filepath}: {str(e)}")
+                errors.append(f"Error processing {doc_filepath}: {str(e)}")
+        
+        message = f"Parsed {len(doc_contents)} documents successfully"
+        if errors:
+            message += f". Errors: {'; '.join(errors[:3])}"
+        
         return {
-            "doc_content": "",
-            "has_document": False,
+            "doc_contents": doc_contents,
+            "has_documents": len(doc_contents) > 0,
+            "messages": [HumanMessage(content=message)]
+        }
+    
+    except Exception as e:
+        logger.error(f"Error in document processing: {str(e)}")
+        return {
+            "doc_contents": [],
+            "has_documents": False,
             "messages": [HumanMessage(content=f"Error: {str(e)}")]
         }
 
 
 async def orchestration_agent(state: State):
-    has_document = bool(state.get("doc_content") and len(state["doc_content"].strip()) > 0)
-    if has_document:
+    has_documents = state.get("has_documents", False)
+    if has_documents:
         return {
-            "has_document": True,
-            "messages": [HumanMessage(content="Document detected")]
+            "has_documents": True,
+            "messages": [HumanMessage(content=f"Documents detected: {len(state.get('doc_contents', []))} files")]
         }
     
     all_tools = [retrieve_relevant_documents]
@@ -191,24 +216,25 @@ You are an expert Indian Legal AI Agent. Provide accurate legal guidance based o
     final_answer = result["messages"][-1].content if result["messages"] else "No answer generated"
     
     return {
-        "has_document": False,
+        "has_documents": False,
         "final_report": final_answer,
         "messages": [HumanMessage(content=final_answer)]
     }
 
 
 async def route_after_orchestration(state: State) -> Literal["chunk_document", "answer_from_cache", "END"]:
-    has_document = bool(state.get("doc_content") and len(state["doc_content"].strip()) > 0)
-    if not has_document:
+    has_documents = state.get("has_documents", False)
+    if not has_documents:
         return "END"
     if state.get("completed_sections") and len(state["completed_sections"]) > 0:
         return "answer_from_cache"
     return "chunk_document"
 
-
 async def answer_from_cache(state: State):
     cached_sections = state.get("completed_sections", [])
     combined_context = "\n\n---\n\n".join(cached_sections)
+    
+    doc_info = "\n".join([f"- {doc['filename']}" for doc in state.get("doc_contents", [])])
     
     all_tools = [retrieve_relevant_documents]
     if MCP_TOOLS:
@@ -238,14 +264,16 @@ Answer the user's question based on the provided document analysis. You can also
 2. **Legal Provisions:** Cite specific Acts and Sections (e.g., "Section 302 IPC / Section 103 BNS").
 3. **Case Laws:** Mention relevant landmark cases (from VectorDB) and recent rulings (from WebSearch).
 4. **Disclaimer:** "Information is for educational purposes and not professional legal advice.
-"""
+    """
     )
     
     messages = state.get("messages", [])
+    prompt_content = f"Documents analyzed:\n{doc_info}\n\nDocument Analysis:\n{combined_context}\n\nUser Question: {state['query']}"
+    
     if not messages:
-        messages = [{"role": "user", "content": f"Document Analysis:\n{combined_context}\n\nUser Question: {state['query']}"}]
+        messages = [{"role": "user", "content": prompt_content}]
     else:
-        messages.append({"role": "user", "content": f"Document Analysis:\n{combined_context}\n\nUser Question: {state['query']}"})
+        messages.append({"role": "user", "content": prompt_content})
     
     result = await agent.ainvoke({"messages": messages})
     final_answer = result["messages"][-1].content if result["messages"] else "No answer generated"
@@ -258,10 +286,20 @@ Answer the user's question based on the provided document analysis. You can also
 
 async def chunk_document(state: State):
     text_splitter = get_text_splitter()
-    splits = text_splitter.split_text(state["doc_content"])
-    chunks = [Section(name=f"Section {i+1}", content=splits[i], chunk_index=i) for i in range(len(splits))]
+    chunks = []
+    
+    for doc_idx, doc_info in enumerate(state.get("doc_contents", [])):
+        splits = text_splitter.split_text(doc_info["content"])
+        for chunk_idx, split in enumerate(splits):
+            chunks.append(
+                Section(
+                    name=f"{doc_info['filename']} - Section {chunk_idx + 1}",
+                    content=split,
+                    chunk_index=len(chunks)
+                )
+            )
+    
     return {"chunks": chunks}
-
 
 async def analyze_chunk(state: WorkerState):
     all_tools = [retrieve_relevant_documents]
