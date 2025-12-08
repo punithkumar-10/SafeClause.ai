@@ -7,10 +7,15 @@ from typing import List, Tuple
 
 logger = logging.getLogger(__name__)
 
+os.loadenv()
+
+access_key = os.getenv("STORJ_ACCESS_KEY")
+secret_key = os.getenv("STORJ_SECRET_KEY")
+
 # Storj credentials
 STORJ_CONFIG = {
-    'access_key': 'jxv52ooceheejwc2njollbeo7gea',
-    'secret_key': 'jyfrizf7g7vekzje7f4wwxa5frdplzbqkt3dao5nabvsbvaxqm46w',
+    'access_key': access_key,
+    'secret_key': secret_key,
     'endpoint_url': 'https://gateway.storjshare.io',
     'bucket_name': 'safeclause-ai'
 }
