@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 from langgraph.types import Send
 from typing_extensions import Literal, TypedDict
 from langgraph.graph import StateGraph, START, END
-from langchain_openai import ChatOpenAI
+from langchain_groq import ChatGroq
 from langgraph.checkpoint.memory import MemorySaver
 from langchain.tools import tool
 from langchain.messages import HumanMessage, trim_messages
@@ -26,7 +26,7 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 # Environment variables
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
 AWS_ACCESS_KEY = os.getenv("AWS_ACCESS_KEY")
@@ -60,8 +60,8 @@ class WorkerState(TypedDict):
     completed_sections: Annotated[list, operator.add]
 
 
-orchestration_model = ChatOpenAI(model_name="gpt-4o-mini", api_key=OPENAI_API_KEY)
-model = ChatOpenAI(model_name="gpt-4o-mini", api_key=OPENAI_API_KEY)
+orchestration_model = ChatGroq(model_name="openai/gpt-oss-120b", api_key=GROQ_API_KEY)
+model = ChatGroq(model_name="openai/gpt-oss-20b", api_key=GROQ_API_KEY)
 
 MCP_TOOLS = []
 MCP_CLIENT = None
@@ -205,6 +205,7 @@ You are an expert Indian Legal AI Agent providing accurate, practical guidance b
 the Indian Constitution, statutory law, and judicial precedents.
 
 The name which i have to this chatbot is "SafeClause.ai"
+ALWAYS TELL THAT YOU ARE SafeClause.ai NOT ChatGPT OR ANY OTHER NAME.
 
 ──────── TOOL USAGE ────────
 • VectorDB (RAG) — PRIMARY:
@@ -280,9 +281,23 @@ async def route_after_orchestration(state: State) -> Literal["chunk_document", "
     return "chunk_document"
 
 
+def truncate_text(text: str, max_chars: int = 25000) -> str:
+    """
+    Truncates text to ensure it fits within LLM context window.
+    25,000 chars is roughly 6,000-7,000 tokens.
+    """
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars] + "\n... [CONTENT TRUNCATED DUE TO LENGTH] ..."
+
+
 async def answer_from_cache(state: State):
     cached_sections = state.get("completed_sections", [])
     combined_context = "\n\n---\n\n".join(cached_sections)
+    
+    # --- FIX: Truncate context to prevent Error 400 ---
+    safe_context = truncate_text(combined_context, max_chars=25000)
+    # --------------------------------------------------
     
     doc_info = "\n".join([f"- {doc['filename']}" for doc in state.get("doc_contents", [])])
     
@@ -321,7 +336,8 @@ Answer the user's question based on the provided document analysis. You can also
     messages = state.get("messages", [])
     messages = trim_message_history(messages)
     
-    prompt_content = f"Documents analyzed:\n{doc_info}\n\nDocument Analysis:\n{combined_context}\n\nUser Question: {state['query']}"
+
+    prompt_content = f"Documents analyzed:\n{doc_info}\n\nDocument Analysis:\n{safe_context}\n\nUser Question: {state['query']}"
     
     if not messages:
         messages = [{"role": "user", "content": prompt_content}]

@@ -7,7 +7,7 @@ import tempfile
 
 import requests
 import streamlit as st
-import streamlit.components.v1 as components # Import components for JS
+import streamlit.components.v1 as components 
 
 from utils.storage_service import upload_to_storj
 
@@ -42,7 +42,7 @@ st.markdown("""
         font-weight: 300;
         font-size: 3.5rem;
         color: #000000;
-        margin-top: 15vh; /* Increased top margin for vertical centering */
+        margin-top: 15vh;
         margin-bottom: 0.5rem;
     }
     
@@ -121,7 +121,8 @@ with st.sidebar:
         )
         
         if uploaded_files:
-            if st.button("Process Sources", use_container_width=True, type="primary"):
+            # --- UPDATED: Button Label Changed ---
+            if st.button("Upload Files", use_container_width=True, type="primary"):
                 progress_bar = st.progress(0.0)
                 temp_paths = []
                 try:
@@ -155,7 +156,6 @@ with st.sidebar:
         reset_session()
 
 # ---------------- Typewriter Effect JavaScript ----------------
-# This script injects JS to find the chat input and animate the placeholder
 typewriter_js = """
 <script>
     const phrases = [
@@ -181,23 +181,19 @@ typewriter_js = """
         const currentPhrase = phrases[currentPhraseIndex];
 
         if (isDeleting) {
-            // Remove a character
             inputField.placeholder = currentPhrase.substring(0, currentCharIndex - 1);
             currentCharIndex--;
-            typeSpeed = 50; // Faster when deleting
+            typeSpeed = 50; 
         } else {
-            // Add a character
             inputField.placeholder = currentPhrase.substring(0, currentCharIndex + 1);
             currentCharIndex++;
-            typeSpeed = 100; // Normal typing speed
+            typeSpeed = 100; 
         }
 
         if (!isDeleting && currentCharIndex === currentPhrase.length) {
-            // Finished typing phrase, pause before deleting
             isDeleting = true;
             typeSpeed = 2000; 
         } else if (isDeleting && currentCharIndex === 0) {
-            // Finished deleting, move to next phrase
             isDeleting = false;
             currentPhraseIndex = (currentPhraseIndex + 1) % phrases.length;
             typeSpeed = 500;
@@ -206,20 +202,16 @@ typewriter_js = """
         setTimeout(typeWriter, typeSpeed);
     }
 
-    // Start the loop
     typeWriter();
 </script>
 """
 
 # ---------------- Main Interface ----------------
 
-# 1. Empty State (Centered & Aligned)
+# 1. Empty State
 if not st.session_state.messages:
-    # TITLE
     st.markdown('<div class="centered-title">SafeClause.ai</div>', unsafe_allow_html=True)
     st.markdown('<div class="centered-subtitle">Where legal knowledge begins</div>', unsafe_allow_html=True)
-    
-    # Inject the JS only on the empty screen
     components.html(typewriter_js, height=0, width=0)
 
 # 2. Chat History
@@ -228,7 +220,6 @@ for msg in st.session_state.messages:
         st.markdown(msg["content"])
 
 # 3. Input & Processing
-# Note: Initial placeholder is set, but JS will immediately overwrite it
 if prompt := st.chat_input("Ask a legal question..."):
     
     st.session_state.messages.append({"role": "user", "content": prompt})
@@ -243,7 +234,10 @@ if prompt := st.chat_input("Ask a legal question..."):
 
     # Assistant Response
     with st.chat_message("assistant"):
-        status_container = st.status("Searching & Analyzing...", expanded=True)
+        # --- UPDATED: Status container logic ---
+        # expanded=False hides the inner content by default (which we aren't using anyway)
+        status_container = st.status("Initializing...", expanded=False)
+        
         response_placeholder = st.empty()
         final_report = ""
         
@@ -265,14 +259,20 @@ if prompt := st.chat_input("Ask a legal question..."):
                     etype = event.get("type")
                     
                     if etype == "progress":
-                        status_container.write(f"⚙️ {event.get('message', 'Processing...')}")
-                    elif etype == "message":
-                        status_container.markdown(f"*{event.get('content')}*")
+                        # --- UPDATED: Swap text instead of stacking ---
+                        # We ONLY update the label (title) of the box.
+                        # We do NOT use .markdown() inside the box.
+                        current_msg = event.get("content", "Processing...")
+                        status_container.update(label=current_msg, state="running")
+                        
                     elif etype == "report":
                         final_report = event.get("content", "")
                         response_placeholder.markdown(final_report)
+                        
                     elif etype == "complete":
+                        # Collapse and mark done
                         status_container.update(label="Analysis Complete", state="complete", expanded=False)
+                        
                     elif etype == "error":
                         status_container.update(label="Error Occurred", state="error")
                         st.error(event.get("error"))
