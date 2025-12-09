@@ -7,6 +7,7 @@ import tempfile
 
 import requests
 import streamlit as st
+import streamlit.components.v1 as components # Import components for JS
 
 from utils.storage_service import upload_to_storj
 
@@ -41,7 +42,7 @@ st.markdown("""
         font-weight: 300;
         font-size: 3.5rem;
         color: #000000;
-        margin-top: 6vh;
+        margin-top: 15vh; /* Increased top margin for vertical centering */
         margin-bottom: 0.5rem;
     }
     
@@ -54,53 +55,16 @@ st.markdown("""
         margin-bottom: 3rem;
     }
 
-    /* 3. Button Styling (Perfectly Aligned) */
-    div.stButton > button {
-        width: 100%;
-        /* Force a fixed height so all boxes are identical */
-        height: 70px !important; 
-        margin: 0px;
-        padding: 0px 20px; /* Horizontal padding */
-        
-        background-color: #ffffff;
-        color: #1f1f1f;
-        border: 1px solid #dcdcdc;
-        border-radius: 10px; 
-        
-        /* Typography */
-        font-family: 'Helvetica Neue', sans-serif;
-        font-size: 15px;
-        text-align: left;
-        
-        /* Flex alignment to keep text perfectly vertically centered */
-        display: flex;
-        align-items: center; 
-        justify-content: flex-start;
-        
-        box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-        transition: all 0.2s ease;
-    }
-
-    div.stButton > button:hover {
-        background-color: #f9f9f9;
-        border-color: #b0b0b0;
-        box-shadow: 0 4px 10px rgba(0,0,0,0.1);
-        transform: translateY(-2px);
-    }
-    
-    div.stButton > button:focus {
-        box-shadow: none;
-        border-color: #000;
-    }
-    
-    /* Remove default column gaps to give us manual control */
-    [data-testid="column"] {
-        padding: 0px 10px; 
-    }
-
     /* Input box styling */
     .stChatInputContainer {
         padding-bottom: 2rem;
+    }
+
+    /* Hide the placeholder text immediately when the user clicks (focuses) 
+       on the input box.
+    */
+    textarea[data-testid="stChatInputTextArea"]:focus::placeholder {
+        color: transparent !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -190,6 +154,63 @@ with st.sidebar:
     if st.button("New Thread", icon="🔄", use_container_width=True):
         reset_session()
 
+# ---------------- Typewriter Effect JavaScript ----------------
+# This script injects JS to find the chat input and animate the placeholder
+typewriter_js = """
+<script>
+    const phrases = [
+        "Draft a Non-Disclosure Agreement for...",
+        "Summarize the liability clauses in this contract...",
+        "Identify the termination conditions...",
+        "Explain the indemnity obligations..."
+    ];
+    
+    let currentPhraseIndex = 0;
+    let currentCharIndex = 0;
+    let isDeleting = false;
+    let typeSpeed = 100;
+
+    function typeWriter() {
+        const inputField = window.parent.document.querySelector('textarea[data-testid="stChatInputTextArea"]');
+        
+        if (!inputField) {
+            setTimeout(typeWriter, 100);
+            return;
+        }
+
+        const currentPhrase = phrases[currentPhraseIndex];
+
+        if (isDeleting) {
+            // Remove a character
+            inputField.placeholder = currentPhrase.substring(0, currentCharIndex - 1);
+            currentCharIndex--;
+            typeSpeed = 50; // Faster when deleting
+        } else {
+            // Add a character
+            inputField.placeholder = currentPhrase.substring(0, currentCharIndex + 1);
+            currentCharIndex++;
+            typeSpeed = 100; // Normal typing speed
+        }
+
+        if (!isDeleting && currentCharIndex === currentPhrase.length) {
+            // Finished typing phrase, pause before deleting
+            isDeleting = true;
+            typeSpeed = 2000; 
+        } else if (isDeleting && currentCharIndex === 0) {
+            // Finished deleting, move to next phrase
+            isDeleting = false;
+            currentPhraseIndex = (currentPhraseIndex + 1) % phrases.length;
+            typeSpeed = 500;
+        }
+
+        setTimeout(typeWriter, typeSpeed);
+    }
+
+    // Start the loop
+    typeWriter();
+</script>
+"""
+
 # ---------------- Main Interface ----------------
 
 # 1. Empty State (Centered & Aligned)
@@ -198,31 +219,8 @@ if not st.session_state.messages:
     st.markdown('<div class="centered-title">SafeClause.ai</div>', unsafe_allow_html=True)
     st.markdown('<div class="centered-subtitle">Where legal knowledge begins</div>', unsafe_allow_html=True)
     
-    st.write("") 
-    st.write("") 
-
-    # --- ALIGNMENT FIX ---
-    # We use 5 columns: [spacer, box1, box2, box3, spacer]
-    # Ratios: 1 (spacer) : 2 (box) : 2 (box) : 2 (box) : 1 (spacer)
-    # This centers the boxes and prevents them from stretching too wide.
-    _, col1, col2, col3, _ = st.columns([0.5, 1, 1, 1, 0.5])
-    
-    prompt_input = None
-
-    with col1:
-        if st.button("📝 Summarize Contract", help="Get a quick overview"):
-            prompt_input = "Summarize the key clauses, obligations, and dates in this contract."
-
-    with col2:
-        if st.button("⚖️ Identify Liabilities", help="Find potential risks"):
-            prompt_input = "Identify all indemnity clauses and potential financial liabilities in this document."
-
-    with col3:
-        if st.button("✍️ Draft NDA for ...", help="Generate a new document"):
-            prompt_input = "Draft a standard Mutual Non-Disclosure Agreement (NDA) for two tech companies."
-
-else:
-    prompt_input = None
+    # Inject the JS only on the empty screen
+    components.html(typewriter_js, height=0, width=0)
 
 # 2. Chat History
 for msg in st.session_state.messages:
@@ -230,7 +228,8 @@ for msg in st.session_state.messages:
         st.markdown(msg["content"])
 
 # 3. Input & Processing
-if prompt := (st.chat_input("Ask a legal question...") or prompt_input):
+# Note: Initial placeholder is set, but JS will immediately overwrite it
+if prompt := st.chat_input("Ask a legal question..."):
     
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
