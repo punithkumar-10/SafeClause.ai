@@ -2,6 +2,8 @@ import os
 import uuid
 import time
 import json
+import threading
+import logging
 from pathlib import Path
 import tempfile
 
@@ -82,8 +84,26 @@ if "docs" not in st.session_state:
 if "files_locked" not in st.session_state:
     st.session_state.files_locked = False
 
+# --- UPDATED: API URL with explicit Port 10000 ---
 if "api_url" not in st.session_state:
-    st.session_state.api_url = os.getenv("API_URL", "http://localhost:8000")
+    st.session_state.api_url = os.getenv("API_URL", "https://safeclause-ai.onrender.com:10000")
+
+# ---------------- Background Wake-Up Call ----------------
+def wake_up_api(url):
+    """Pings the API health endpoint silently to wake up Render."""
+    try:
+        # This will hit https://safeclause-ai.onrender.com:10000/health
+        requests.get(f"{url}/health", timeout=5)
+        print("✅ API Wake-up call sent successfully.")
+    except Exception as e:
+        print(f"⚠️ API Wake-up call failed (might be starting up): {e}")
+
+# Trigger wake-up only once per session start
+if "api_woken" not in st.session_state:
+    st.session_state.api_woken = True
+    # Run in a separate thread so it doesn't block the UI load
+    thread = threading.Thread(target=wake_up_api, args=(st.session_state.api_url,))
+    thread.start()
 
 # ---------------- Helper Functions ----------------
 @st.dialog("Sources Locked")
@@ -121,7 +141,6 @@ with st.sidebar:
         )
         
         if uploaded_files:
-            # --- UPDATED: Button Label Changed ---
             if st.button("Upload Files", use_container_width=True, type="primary"):
                 progress_bar = st.progress(0.0)
                 temp_paths = []
@@ -234,8 +253,6 @@ if prompt := st.chat_input("Ask a legal question..."):
 
     # Assistant Response
     with st.chat_message("assistant"):
-        # --- UPDATED: Status container logic ---
-        # expanded=False hides the inner content by default (which we aren't using anyway)
         status_container = st.status("Initializing...", expanded=False)
         
         response_placeholder = st.empty()
@@ -259,9 +276,6 @@ if prompt := st.chat_input("Ask a legal question..."):
                     etype = event.get("type")
                     
                     if etype == "progress":
-                        # --- UPDATED: Swap text instead of stacking ---
-                        # We ONLY update the label (title) of the box.
-                        # We do NOT use .markdown() inside the box.
                         current_msg = event.get("content", "Processing...")
                         status_container.update(label=current_msg, state="running")
                         
@@ -270,7 +284,6 @@ if prompt := st.chat_input("Ask a legal question..."):
                         response_placeholder.markdown(final_report)
                         
                     elif etype == "complete":
-                        # Collapse and mark done
                         status_container.update(label="Analysis Complete", state="complete", expanded=False)
                         
                     elif etype == "error":
