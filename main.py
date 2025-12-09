@@ -7,6 +7,7 @@ from fastapi.responses import StreamingResponse
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 from langchain.messages import HumanMessage
+import uvicorn
 
 from agent import build_graph, get_graph, stream_graph_updates, State
 
@@ -164,10 +165,10 @@ async def stream_query_response(input_state: State, config: dict):
 
 
 if __name__ == "__main__":
-    import uvicorn
+    port = int(os.environ.get("PORT", 8000))
     uvicorn.run(
         app,
         host="0.0.0.0",
-        port=8000,
+        port=port,
         log_level="info"
     )
