@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 from langchain.messages import HumanMessage
 import uvicorn
+import os
 
 from agent import build_graph, get_graph, stream_graph_updates, State
 
@@ -16,6 +17,16 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# --- 1. CONFIG: Friendly names for your technical graph nodes ---
+NODE_MESSAGES = {
+    "download_and_parse_document": "📥 Downloading and processing documents...",
+    "orchestration_agent": "🧠 Analyzing query intent & legal context...",
+    "retrieve_relevant_documents": "🔍 Searching legal databases & case laws...",
+    "chunk_document": "📄 Splitting documents into sections...",
+    "analyze_chunk": "⚖️ Reviewing individual clauses for compliance...",
+    "synthesizer": "✍️ Drafting final legal assessment...",
+    "answer_from_cache": "⚡ Retrieving analysis from memory...",
+}
 
 class QueryRequest(BaseModel):
     query: str = Field(..., description="User's legal query")
@@ -45,33 +56,23 @@ app = FastAPI(
 
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
-    """Health check endpoint."""
-    return HealthResponse(
-        status="healthy",
-        message="Legal Document Analysis API is running"
-    )
+    return HealthResponse(status="healthy", message="Legal Document Analysis API is running")
 
 
 @app.post("/query")
 async def query(request: QueryRequest):
     """
     Stream legal query analysis in real-time.
-    
-    Uses LangGraph astream() with stream_mode="updates" to yield
-    state changes after each node executes.
     """
     try:
         GRAPH = get_graph()
         if not GRAPH:
-            raise HTTPException(
-                status_code=500,
-                detail="Graph not initialized"
-            )
+            raise HTTPException(status_code=500, detail="Graph not initialized")
         
         session_id = request.session_id
         config = {"configurable": {"thread_id": session_id}}
         
-        # Retrieve previous state from checkpointer
+        # Retrieve previous state
         previous_state = GRAPH.get_state(config)
         
         if previous_state and previous_state.values:
@@ -118,11 +119,6 @@ async def query(request: QueryRequest):
 async def stream_query_response(input_state: State, config: dict):
     """
     Stream graph updates using astream with stream_mode="updates".
-    
-    Yields JSON events:
-    - report: Final analysis results
-    - complete: Stream completion signal
-    - error: Error notifications
     """
     async def event_generator():
         try:
@@ -130,8 +126,8 @@ async def stream_query_response(input_state: State, config: dict):
             final_report = ""
             
             async for chunk in stream_graph_updates(
-                input_state,
-                config,
+                input_state, 
+                config, 
                 stream_mode="updates"
             ):
                 node_count += 1
@@ -139,9 +135,18 @@ async def stream_query_response(input_state: State, config: dict):
                 for node_name, state_updates in chunk.items():
                     logger.info(f"Node {node_count}: {node_name}")
                     
+                    # --- NEW LOGIC: Send Progress Event ---
+                    friendly_message = NODE_MESSAGES.get(node_name, f"Processing step: {node_name}...")
+                    
+                    yield json.dumps({
+                        "type": "progress", 
+                        "node": node_name,
+                        "content": friendly_message
+                    }) + "\n"
+                    # --------------------------------------
+
                     if "final_report" in state_updates and state_updates["final_report"]:
                         final_report = state_updates["final_report"]
-                        logger.info(f"Final report generated from {node_name}")
                         yield json.dumps({
                             "type": "report",
                             "node": node_name,
