@@ -10,6 +10,15 @@ Powered by **OpenAI models**, **Model Context Protocol (MCP)**, and **Hybrid RAG
 
 ---
 
+## 🌐 Live Demo
+
+Try out the live application here: **[SafeClause.ai Streamlit App](https://safeclause-ai.streamlit.app/)**
+
+> **⚠️ Note on Server Availability:**
+> This demo is hosted on a free-tier server. If the application takes time to process your first request or seems unresponsive, the server may be "sleeping" due to inactivity. Please allow few minutes** for it to spin up.
+
+---
+
 ## 🚀 What It Does
 
 SafeClause.ai goes beyond simple chat. It is a full-stack legal agent capable of:
@@ -37,15 +46,14 @@ While ChatGPT is great for emails, it cannot manage a legal workflow. It doesn't
 ## 🧠 Under the Hood: Architecture & Workflow
 
 ### Agent Orchestration Workflow
-<img src="img/agent_workflow.png" alt="Agent Workflow" width="40%">
+<img src="img/agent_workflow.png" alt="Agent Workflow" width="70%">
 
 *An overview of SafeClause.ai's multi-agent orchestration workflow. The system intelligently decides between simple query, quick memory-based answers and complex document processing pipelines involving parallel chunk analysis and synthesis using LangGraph.*
 
 ### Hybrid RAG System
-<img src="img/hybrid_rag.png" alt="Hybrid RAG System" width="40%">
+<img src="img/hybrid_rag.png" alt="Hybrid RAG System" width="70%">
 
 *Our Hybrid RAG mechanism combines the precision of keyword-based sparse search with the semantic understanding of dense vector search. The combined results are passed through a reranker to ensure only the most relevant legal context reaches the final answer generation step.*
-
 ---
 
 ## 💻 Tech Stack
