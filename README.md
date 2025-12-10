@@ -1,7 +1,6 @@
 # ⚖️ SafeClause.ai
 ### *Where legal knowledge begins*
 
-![SafeClause Banner](https://images.unsplash.com/photo-1589829085413-56de8ae18c73?q=80&w=2500&auto=format&fit=crop)
 
 ## 🇮🇳 Built for the Indian Legal System
 
@@ -99,3 +98,4 @@ Pasting sensitive client contracts into public chatbots puts attorney-client pri
 ---
 
 **SafeClause.ai** — *Where legal knowledge begins.*
+
