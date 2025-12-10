@@ -248,11 +248,10 @@ typewriter_js = """
 
 # ---------------- Main Interface ----------------
 
-# 1. Empty State (With Local Custom Image)
 if not st.session_state.messages:
     
     # Image Loading Logic
-    image_path = "justice_icon.png"
+    image_path = "img/justice_icon.png"
     bg_style = ""
     
     if os.path.exists(image_path):

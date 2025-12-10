@@ -1,4 +1,3 @@
-# tools/rag_tool.py
 import asyncio
 import logging
 import os
