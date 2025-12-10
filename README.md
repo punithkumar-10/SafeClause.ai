@@ -34,8 +34,15 @@ While ChatGPT is great for emails, it cannot manage a legal workflow. It doesn't
 > **The SafeClause Difference:** SafeClause.ai is designed for the legal lifecycle. From **researching** a point of law to **reviewing** a contract for loopholes and **drafting** the final agreement, it handles the entire pipeline in one secure workspace.
 
 ---
+## 🧠 Under the Hood: Architecture & Workflow
 
+### Agent Orchestration Workflow
+![Agent Workflow](img/agent_workflow.png)
+*An overview of SafeClause.ai's multi-agent orchestration workflow. The system intelligently decides between simple query, quick memory-based answers and complex document processing pipelines involving parallel chunk analysis and synthesis using LangGraph.*
 
+### Hybrid RAG System
+![Hybrid RAG System](img/hybrid_rag.png)
+*Our Hybrid RAG mechanism combines the precision of keyword-based sparse search with the semantic understanding of dense vector search. The combined results are passed through a reranker to ensure only the most relevant legal context reaches the final answer generation step.*
 ---
 
 ## 💻 Tech Stack
@@ -85,6 +92,7 @@ While ChatGPT is great for emails, it cannot manage a legal workflow. It doesn't
 ---
 
 **SafeClause.ai** — *Where legal knowledge begins.*
+
 
 
 
