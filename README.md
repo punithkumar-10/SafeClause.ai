@@ -6,7 +6,7 @@
 
 **SafeClause.ai** is a specialized AI-powered legal assistant designed specifically for the Indian legal landscape. Unlike general-purpose AI models, SafeClause is engineered to understand, analyze, and generate content strictly adhering to Indian laws, Acts, and Constitutional clauses.
 
-Powered by **Model Context Protocol (MCP)** and **Hybrid RAG**, it serves as an intelligent bridge between complex legal jargon and actionable insights, empowering lawyers, law students, and businesses to navigate the Indian judiciary system with confidence.
+Powered by **OpenAI models**, **Model Context Protocol (MCP)**, and **Hybrid RAG systems**, it delivers fast, accurate, and reliable responses, serving as an intelligent bridge between complex legal jargon and actionable insights for lawyers, law students, and businesses.
 
 ---
 
@@ -98,5 +98,6 @@ Pasting sensitive client contracts into public chatbots puts attorney-client pri
 ---
 
 **SafeClause.ai** — *Where legal knowledge begins.*
+
 
 
