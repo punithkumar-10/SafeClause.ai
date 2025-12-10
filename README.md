@@ -37,12 +37,15 @@ While ChatGPT is great for emails, it cannot manage a legal workflow. It doesn't
 ## 🧠 Under the Hood: Architecture & Workflow
 
 ### Agent Orchestration Workflow
-![Agent Workflow](img/agent_workflow.png)
+<img src="img/agent_workflow.png" alt="Agent Workflow" width="40%">
+
 *An overview of SafeClause.ai's multi-agent orchestration workflow. The system intelligently decides between simple query, quick memory-based answers and complex document processing pipelines involving parallel chunk analysis and synthesis using LangGraph.*
 
 ### Hybrid RAG System
-![Hybrid RAG System](img/hybrid_rag.png)
+<img src="img/hybrid_rag.png" alt="Hybrid RAG System" width="40%">
+
 *Our Hybrid RAG mechanism combines the precision of keyword-based sparse search with the semantic understanding of dense vector search. The combined results are passed through a reranker to ensure only the most relevant legal context reaches the final answer generation step.*
+
 ---
 
 ## 💻 Tech Stack
@@ -59,29 +62,29 @@ While ChatGPT is great for emails, it cannot manage a legal workflow. It doesn't
 
 ## 📥 Installation
 
-1.  **Clone the repository**
-    ```bash
-    git clone [https://github.com/your-username/SafeClause.ai.git](https://github.com/your-username/SafeClause.ai.git)
-    cd SafeClause.ai
-    ```
+1.  **Clone the repository**
+    ```bash
+    git clone [https://github.com/your-username/SafeClause.ai.git](https://github.com/your-username/SafeClause.ai.git)
+    cd SafeClause.ai
+    ```
 
-2.  **Install dependencies**
-    ```bash
-    pip install -r requirements.txt
-    ```
+2.  **Install dependencies**
+    ```bash
+    pip install -r requirements.txt
+    ```
 
-3.  **Set up Environment Variables**
-    Create a `.env` file and add your API keys.
+3.  **Set up Environment Variables**
+    Create a `.env` file and add your API keys.
 
-4.  **Run the FastAPI Server**
-    ```bash
-    uvicorn main:app --host 0.0.0.0 --port 10000
-    ```
+4.  **Run the FastAPI Server**
+    ```bash
+    uvicorn main:app --host 0.0.0.0 --port 10000
+    ```
 
-6.  **Run the Frontend Application**
-    ```bash
-    streamlit run app.py
-    ```
+6.  **Run the Frontend Application**
+    ```bash
+    streamlit run app.py
+    ```
 
 ---
 
@@ -92,8 +95,3 @@ While ChatGPT is great for emails, it cannot manage a legal workflow. It doesn't
 ---
 
 **SafeClause.ai** — *Where legal knowledge begins.*
-
-
-
-
-
