@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 # --- 1. CONFIG: Friendly names for your technical graph nodes ---
 NODE_MESSAGES = {
-    "download_and_parse_document": "📥 Downloading and processing documents...",
+    "download_and_parse_document": "🧾 Generating results...",
     "orchestration_agent": "🧠 Analyzing query intent & legal context...",
     "retrieve_relevant_documents": "🔍 Searching legal databases & case laws...",
     "chunk_document": "📄 Splitting documents into sections...",
