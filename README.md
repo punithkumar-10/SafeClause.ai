@@ -25,42 +25,28 @@ SafeClause.ai goes beyond simple chat. It is a full-stack legal agent capable of
 
 In the era of Generative AI, tools like ChatGPT are powerful but often dangerous for legal work. SafeClause.ai addresses the critical gaps that general-purpose LLMs cannot fill.
 
-### 1. No More "Hallucinations"
-General AI models often invent fake cases or cite non-existent laws because they prioritize sounding natural over being factual.
-> **The SafeClause Difference:** We use a Retrieval-Augmented Generation (RAG) architecture grounded strictly in Indian legal databases. If a section doesn't exist in the Indian Penal Code, SafeClause won't invent it.
+### No More "Hallucinations"
+General AI models often cite non-existent laws because they prioritize sounding natural over being factual.
+> **The SafeClause Difference:** We use a Hybrid RAG architecture grounded strictly in Indian legal databases. If a section doesn't exist in the Indian Penal Code, SafeClause won't invent it.
 
-### 2. Context-Aware for India
-Generic models perform well on US/UK law but often fail to grasp the nuances of Indian amendments, state-specific regulations, and local compliance rules.
-> **The SafeClause Difference:** Our model is fine-tuned on the Indian judicial framework, ensuring that terms like *Vakalatnama*, *Stamp Duty*, and *Jurisdiction* are handled with the correct local context.
-
-### 3. End-to-End Workflow vs. Simple Chat
+### End-to-End Workflow vs. Simple Chat
 While ChatGPT is great for emails, it cannot manage a legal workflow. It doesn't know how to cross-reference a draft contract against the latest Supreme Court judgment.
 > **The SafeClause Difference:** SafeClause.ai is designed for the legal lifecycle. From **researching** a point of law to **reviewing** a contract for loopholes and **drafting** the final agreement, it handles the entire pipeline in one secure workspace.
 
-### 4. Data Privacy & Security
-Pasting sensitive client contracts into public chatbots puts attorney-client privilege at risk.
-> **The SafeClause Difference:** Built with enterprise-grade security practices, ensuring that sensitive legal documents processed during analysis remain private and secure.
-
 ---
 
-## 🛠️ Key Features
-
-| Feature | Description |
-| :--- | :--- |
-| **Indian Legal Corpus** | Trained on the Constitution of India, IPC, CrPC, Evidence Act, and specialized corporate laws. |
-| **Clause-by-Clause Review** | Breaks down uploaded documents to analyze specific clauses for risk and compliance. |
-| **Jurisdiction Specificity** | Recognizes differences in legal applicability across different Indian states. |
-| **Citation Support** | Every answer provides references to the specific Act and Section used for the conclusion. |
 
 ---
 
 ## 💻 Tech Stack
 
 * **Frontend:** Streamlit
-* **LLM Orchestration:** LangChain / LangGraph
-* **Vector Database:** Pinecone / ChromaDB (for RAG)
-* **Language Model:** Fine-tuned LLMs / OpenAI GPT-4o (Optimized for Legal Logic)
-* **Backend:** Python
+* **LLM Orchestration:** LangChain, LangGraph.
+* **Vector Database:** Pinecone
+* **MCP:** Tavily MCP
+* **Object Storage:** Storj (AWS S3 compatiable)
+* **Language Model:** openai/gpt-oss-120b, openai/gpt-oss-20b via Groq
+* **Backend:** Python, FastAPI, Docker
 
 ---
 
@@ -78,13 +64,14 @@ Pasting sensitive client contracts into public chatbots puts attorney-client pri
     ```
 
 3.  **Set up Environment Variables**
-    Create a `.env` file and add your API keys:
+    Create a `.env` file and add your API keys.
+
+4.  **Run the FastAPI Server**
     ```bash
-    OPENAI_API_KEY="your_api_key"
-    PINECONE_API_KEY="your_api_key"
+    uvicorn main:app --host 0.0.0.0 --port 10000
     ```
 
-4.  **Run the Application**
+6.  **Run the Frontend Application**
     ```bash
     streamlit run app.py
     ```
@@ -98,6 +85,7 @@ Pasting sensitive client contracts into public chatbots puts attorney-client pri
 ---
 
 **SafeClause.ai** — *Where legal knowledge begins.*
+
 
 
 
