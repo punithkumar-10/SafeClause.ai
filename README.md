@@ -12,7 +12,7 @@ Powered by **OpenAI models**, **Model Context Protocol (MCP)**, and **Hybrid RAG
 
 ## 🌐 Live Demo
 
-Try out the live application here: **[SafeClause.ai Streamlit App](https://safeclause-ai.streamlit.app/)**
+Try out the live application here: **[SafeClause.ai](https://safeclause-ai.streamlit.app/)**
 
 > **⚠️ Note on Server Availability:**
 > This demo is hosted on a free-tier server. If the application takes time to process your first request or seems unresponsive, the server may be "sleeping" due to inactivity. Please allow few minutes** for it to spin up.
@@ -103,3 +103,4 @@ While ChatGPT is great for emails, it cannot manage a legal workflow. It doesn't
 ---
 
 **SafeClause.ai** — *Where legal knowledge begins.*
+
