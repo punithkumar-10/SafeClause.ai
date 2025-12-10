@@ -4,6 +4,7 @@ import time
 import json
 import threading
 import logging
+import base64
 from pathlib import Path
 import tempfile
 
@@ -44,8 +45,13 @@ st.markdown("""
         font-weight: 300;
         font-size: 3.5rem;
         color: #000000;
-        margin-top: 15vh;
+        
+        /* CHANGED: Increased from 15vh to 30vh to move everything down to center */
+        margin-top: 30vh; 
+        
         margin-bottom: 0.5rem;
+        position: relative;
+        z-index: 2; /* Ensure text is above image */
     }
     
     .centered-subtitle {
@@ -54,7 +60,30 @@ st.markdown("""
         font-weight: 400;
         color: #666;
         font-size: 1.1rem;
-        margin-bottom: 3rem;
+        margin-bottom: 1rem; 
+        position: relative;
+        z-index: 2;
+    }
+
+    /* 3. Background Justice Element (Flow-based) */
+    .justice-bg {
+        display: block;
+        width: 100%;   
+        height: 60vh;
+        
+        /* Positioning logic */
+        margin-top: -2rem; /* Pull it closer to the text */
+        margin-left: auto;
+        margin-right: auto;
+        
+        /* Image handling */
+        background-repeat: no-repeat;
+        background-position: top center; 
+        background-size: 400px; 
+        
+        opacity: 0.1; /* Translucent effect */
+        z-index: 1;    /* Behind text */
+        pointer-events: none;
     }
 
     /* Input box styling */
@@ -62,9 +91,6 @@ st.markdown("""
         padding-bottom: 2rem;
     }
 
-    /* Hide the placeholder text immediately when the user clicks (focuses) 
-       on the input box.
-    */
     textarea[data-testid="stChatInputTextArea"]:focus::placeholder {
         color: transparent !important;
     }
@@ -84,24 +110,19 @@ if "docs" not in st.session_state:
 if "files_locked" not in st.session_state:
     st.session_state.files_locked = False
 
-# --- UPDATED: API URL with explicit Port 10000 ---
+# --- API URL ---
 if "api_url" not in st.session_state:
-    st.session_state.api_url = os.getenv("API_URL", "https://safeclause-ai.onrender.com:10000")
+    st.session_state.api_url = os.getenv("API_URL", "https://safeclause-ai.onrender.com")
 
 # ---------------- Background Wake-Up Call ----------------
 def wake_up_api(url):
-    """Pings the API health endpoint silently to wake up Render."""
     try:
-        # This will hit https://safeclause-ai.onrender.com:10000/health
         requests.get(f"{url}/health", timeout=5)
-        print("✅ API Wake-up call sent successfully.")
-    except Exception as e:
-        print(f"⚠️ API Wake-up call failed (might be starting up): {e}")
+    except Exception:
+        pass
 
-# Trigger wake-up only once per session start
 if "api_woken" not in st.session_state:
     st.session_state.api_woken = True
-    # Run in a separate thread so it doesn't block the UI load
     thread = threading.Thread(target=wake_up_api, args=(st.session_state.api_url,))
     thread.start()
 
@@ -227,10 +248,31 @@ typewriter_js = """
 
 # ---------------- Main Interface ----------------
 
-# 1. Empty State
+# 1. Empty State (With Local Custom Image)
 if not st.session_state.messages:
+    
+    # Image Loading Logic
+    image_path = "justice_icon.png"
+    bg_style = ""
+    
+    if os.path.exists(image_path):
+        try:
+            with open(image_path, "rb") as f:
+                data = base64.b64encode(f.read()).decode("utf-8")
+            bg_style = f'style="background-image: url(data:image/png;base64,{data});"'
+        except Exception as e:
+            st.error(f"Error loading image: {e}")
+    else:
+        # Fallback
+        default_url = "https://cdn-icons-png.flaticon.com/512/924/924953.png"
+        bg_style = f'style="background-image: url({default_url}); opacity: 0.05;"'
+
     st.markdown('<div class="centered-title">SafeClause.ai</div>', unsafe_allow_html=True)
     st.markdown('<div class="centered-subtitle">Where legal knowledge begins</div>', unsafe_allow_html=True)
+    
+    # The Background Image Div
+    st.markdown(f'<div class="justice-bg" {bg_style}></div>', unsafe_allow_html=True)
+    
     components.html(typewriter_js, height=0, width=0)
 
 # 2. Chat History
@@ -251,10 +293,8 @@ if prompt := st.chat_input("Ask a legal question..."):
         "session_id": st.session_state.session_id,
     }
 
-    # Assistant Response
     with st.chat_message("assistant"):
         status_container = st.status("Initializing...", expanded=False)
-        
         response_placeholder = st.empty()
         final_report = ""
         
@@ -272,30 +312,25 @@ if prompt := st.chat_input("Ask a legal question..."):
                     try:
                         event = json.loads(line)
                     except: continue
-
-                    etype = event.get("type")
                     
+                    etype = event.get("type")
                     if etype == "progress":
-                        current_msg = event.get("content", "Processing...")
-                        status_container.update(label=current_msg, state="running")
-                        
+                        status_container.update(label=event.get("content", "Processing..."), state="running")
                     elif etype == "report":
                         final_report = event.get("content", "")
                         response_placeholder.markdown(final_report)
-                        
                     elif etype == "complete":
                         status_container.update(label="Analysis Complete", state="complete", expanded=False)
-                        
                     elif etype == "error":
-                        status_container.update(label="Error Occurred", state="error")
+                        status_container.update(label="Error", state="error")
                         st.error(event.get("error"))
             else:
                 status_container.update(label="Server Error", state="error")
-                st.error(f"API returned status code: {response.status_code}")
+                st.error(f"Status code: {response.status_code}")
 
         except Exception as e:
             status_container.update(label="Connection Error", state="error")
-            st.error(f"Could not connect to API: {str(e)}")
+            st.error(f"Error: {str(e)}")
 
     if final_report:
         st.session_state.messages.append({"role": "assistant", "content": final_report})
