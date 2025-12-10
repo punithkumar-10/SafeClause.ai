@@ -1,4 +1,3 @@
-# storage_service.py
 import requests
 from requests_aws4auth import AWS4Auth
 import os

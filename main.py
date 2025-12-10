@@ -17,7 +17,6 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- 1. CONFIG: Friendly names for your technical graph nodes ---
 NODE_MESSAGES = {
     "download_and_parse_document": "🧾 Generating results...",
     "orchestration_agent": "🧠 Analyzing query intent & legal context...",
@@ -134,8 +133,7 @@ async def stream_query_response(input_state: State, config: dict):
                 
                 for node_name, state_updates in chunk.items():
                     logger.info(f"Node {node_count}: {node_name}")
-                    
-                    # --- NEW LOGIC: Send Progress Event ---
+
                     friendly_message = NODE_MESSAGES.get(node_name, f"Processing step: {node_name}...")
                     
                     yield json.dumps({
@@ -143,7 +141,7 @@ async def stream_query_response(input_state: State, config: dict):
                         "node": node_name,
                         "content": friendly_message
                     }) + "\n"
-                    # --------------------------------------
+
 
                     if "final_report" in state_updates and state_updates["final_report"]:
                         final_report = state_updates["final_report"]
@@ -170,7 +168,7 @@ async def stream_query_response(input_state: State, config: dict):
 
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8000))
+    port = int(os.environ.get("PORT", 10000))
     uvicorn.run(
         app,
         host="0.0.0.0",
