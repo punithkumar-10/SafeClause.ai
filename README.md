@@ -54,6 +54,7 @@ While ChatGPT is great for emails, it cannot manage a legal workflow. It doesn't
 <img src="img/hybrid_rag.png" alt="Hybrid RAG System" width="70%">
 
 *Our Hybrid RAG mechanism combines the precision of keyword-based sparse search with the semantic understanding of dense vector search. The combined results are passed through a reranker to ensure only the most relevant legal context reaches the final answer generation step.*
+
 ---
 
 ## 💻 Tech Stack
@@ -62,6 +63,7 @@ While ChatGPT is great for emails, it cannot manage a legal workflow. It doesn't
 * **LLM Orchestration:** LangChain, LangGraph.
 * **Vector Database:** Pinecone
 * **MCP:** Tavily MCP
+* **Data Parsing and Extraction:** Llamaparse
 * **Object Storage:** Storj (AWS S3 compatiable)
 * **Language Model:** openai/gpt-oss-120b, openai/gpt-oss-20b via Groq
 * **Backend:** Python, FastAPI, Docker
@@ -103,4 +105,5 @@ While ChatGPT is great for emails, it cannot manage a legal workflow. It doesn't
 ---
 
 **SafeClause.ai** — *Where legal knowledge begins.*
+
 
