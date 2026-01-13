@@ -89,4 +89,4 @@ cache.json
 *.sqlite
 
 
-uv.lock
+uv.lock.env
