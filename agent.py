@@ -95,10 +95,23 @@ def get_text_splitter():
 async def setup_mcp_client():
     global MCP_CLIENT
     if MCP_CLIENT is None:
-        MCP_CLIENT = MultiServerMCPClient({"tavily": {"transport": "streamable_http", "url": f"https://mcp.tavily.com/mcp/?tavilyApiKey={TAVILY_API_KEY}"}})
-        mcp_tools = await MCP_CLIENT.get_tools()
+        MCP_CLIENT = MultiServerMCPClient({
+            "tavily": {
+                "transport": "streamable_http",
+                "url": f"https://mcp.tavily.com/mcp/?tavilyApiKey={TAVILY_API_KEY}"
+            }
+        })
+        mcp_tools = await MCP_CLIENT.get_tools()  # Load FIRST
+        
+        # Now debug schema
+        tavily_tool = next((t for t in mcp_tools if t.name == "tavily_search"), None)
+        if tavily_tool:
+            # Log schema (adjust attr if needed)
+            schema_info = getattr(tavily_tool, 'args_schema', getattr(tavily_tool, 'schema', 'Unknown'))
+            logger.info(f"tavily_search schema: {schema_info}")
+        
         return [t for t in mcp_tools if t.name in ["tavily_search", "tavily_extract"]]
-    return []
+    return MCP_TOOLS  # Cache existing
 
 
 @tool
@@ -213,6 +226,7 @@ ALWAYS TELL THAT YOU ARE SafeClause.ai NOT ChatGPT OR ANY OTHER NAME.
 • WebSearch — SECONDARY (only when required):
   Recent judgments, amendments, notifications, repeals.
 • If sources conflict, prioritize the most recent verified information.
+  example: tavily_search(query: str, max_results=3–10), without using top_n or any other param.
 
 ──────── CORE LEGAL RULES ────────
 1. Old vs New Codes:
@@ -318,6 +332,7 @@ Answer the user's question based on the provided document analysis. You can also
    - Recent Supreme Court/High Court judgments (current year).
    - Latest amendments or government notifications.
    - Verification if a specific law has been repealed or updated.
+   - example: tavily_search(query: str, max_results=3–10), without using top_n or any other param.
 
 **CORE INSTRUCTIONS**
 1. **Old vs. New Law:** If a user asks about old codes (IPC, CrPC, Evidence Act), you MUST provide the corresponding sections in the new Sanhitas (BNS, BNSS, BSA) alongside the old ones.
@@ -389,6 +404,7 @@ Analyze the provided document section for legal validity, risks, and compliance.
 **MANDATORY TOOL PROTOCOL**
 1. **RAG:** Cross-reference the input text with stored Indian laws and standard clauses.
 2. **WebSearch:** Verify the clause's current validity against the latest amendments and judgments.
+   - example: tavily_search(query: str, max_results=3–10), without using top_n or any other param.
 
 **OUTPUT STRUCTURE**
 1. **Original Data:** [Insert the verbatim input section]
@@ -423,6 +439,9 @@ async def synthesizer(state: State):
 ### SYSTEM PROMPT
 **TASK**
 Synthesize the provided individual section analyses into a comprehensive Final Legal Review Report.
+
+**Web Search**
+  example: tavily_search(query: str, max_results=3–10), without using top_n or any other param.
 
 **EXECUTION INSTRUCTIONS**
 For *each* section provided in the input, you must generate a structured assessment containing the following five components:
