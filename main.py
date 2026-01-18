@@ -2,15 +2,18 @@ import logging
 import json
 import asyncio
 from pydantic import BaseModel, Field
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.responses import StreamingResponse
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 from langchain.messages import HumanMessage
 import uvicorn
 import os
+import tempfile
+from pathlib import Path
 
 from agent import build_graph, get_graph, stream_graph_updates, State
+from utils.storage_service import upload_to_storj
 
 load_dotenv()
 
@@ -56,6 +59,59 @@ app = FastAPI(
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
     return HealthResponse(status="healthy", message="Legal Document Analysis API is running")
+
+
+@app.post("/upload")
+async def upload_file(file: UploadFile = File(...)):
+    """
+    Upload a file to Storj storage and return the URL.
+    """
+    try:
+        logger.info(f"Uploading file: {file.filename}")
+        
+        # Create a temporary file
+        with tempfile.NamedTemporaryFile(delete=False, suffix=Path(file.filename).suffix) as tmp_file:
+            # Write uploaded content to temp file
+            content = await file.read()
+            tmp_file.write(content)
+            tmp_file_path = tmp_file.name
+        
+        try:
+            # Upload to Storj with original filename
+            success, result = upload_to_storj(tmp_file_path, file.filename)
+            
+            if success:
+                logger.info(f"Successfully uploaded {file.filename}")
+                return {
+                    "success": True,
+                    "filename": file.filename,
+                    "url": result,
+                    "message": f"Successfully uploaded {file.filename}"
+                }
+            else:
+                logger.error(f"Failed to upload {file.filename}: {result}")
+                return {
+                    "success": False,
+                    "filename": file.filename,
+                    "error": result,
+                    "message": f"Failed to upload {file.filename}"
+                }
+        
+        finally:
+            # Clean up temp file
+            try:
+                os.unlink(tmp_file_path)
+            except Exception as e:
+                logger.warning(f"Failed to cleanup temp file: {e}")
+    
+    except Exception as e:
+        logger.error(f"Error in upload endpoint: {str(e)}", exc_info=True)
+        return {
+            "success": False,
+            "filename": file.filename if file else "unknown",
+            "error": str(e),
+            "message": "Upload failed due to server error"
+        }
 
 
 @app.post("/query")

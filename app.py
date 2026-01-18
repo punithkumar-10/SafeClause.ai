@@ -6,13 +6,10 @@ import threading
 import logging
 import base64
 from pathlib import Path
-import tempfile
 
 import requests
 import streamlit as st
-import streamlit.components.v1 as components 
-
-from utils.storage_service import upload_to_storj
+import streamlit.components.v1 as components
 
 # Configure logging
 logging.basicConfig(
@@ -172,50 +169,55 @@ with st.sidebar:
             if st.button("Upload Files", use_container_width=True, type="primary"):
                 progress_bar = st.progress(0.0)
                 status_text = st.empty()
-                temp_paths = []
-                uploaded_file_names = []
                 
-                try:
-                    # Create temporary files and store original names
-                    for f in uploaded_files:
-                        with tempfile.NamedTemporaryFile(delete=False, suffix=Path(f.name).suffix) as tmp:
-                            tmp.write(f.getbuffer())
-                            temp_paths.append(tmp.name)
-                            uploaded_file_names.append(f.name)
+                upload_success_count = 0
+                
+                for i, uploaded_file in enumerate(uploaded_files, 1):
+                    status_text.text(f"Uploading {uploaded_file.name}... ({i}/{len(uploaded_files)})")
+                    progress_bar.progress(i / len(uploaded_files))
                     
-                    # Upload each file with original filename
-                    upload_success_count = 0
-                    for i, (temp_path, original_name) in enumerate(zip(temp_paths, uploaded_file_names), 1):
-                        status_text.text(f"Uploading {original_name}... ({i}/{len(temp_paths)})")
-                        progress_bar.progress(i / len(temp_paths))
+                    try:
+                        # Prepare file for upload to backend
+                        files = {"file": (uploaded_file.name, uploaded_file.getvalue(), uploaded_file.type)}
                         
-                        ok, result = upload_to_storj(temp_path, original_name)
-                        if ok:
-                            st.session_state.docs.append({"name": original_name, "url": result})
-                            upload_success_count += 1
-                            st.success(f"✅ Uploaded: {original_name}")
+                        # Send to backend upload endpoint
+                        response = requests.post(
+                            f"{st.session_state.api_url}/upload",
+                            files=files,
+                            timeout=30
+                        )
+                        
+                        if response.status_code == 200:
+                            result = response.json()
+                            if result.get("success"):
+                                st.session_state.docs.append({
+                                    "name": uploaded_file.name, 
+                                    "url": result.get("url")
+                                })
+                                upload_success_count += 1
+                                st.success(f"✅ Uploaded: {uploaded_file.name}")
+                            else:
+                                error_msg = result.get("error", "Unknown error")
+                                st.error(f"❌ Failed to upload {uploaded_file.name}: {error_msg}")
                         else:
-                            st.error(f"❌ Failed to upload {original_name}: {result}")
+                            st.error(f"❌ Failed to upload {uploaded_file.name}: Server error {response.status_code}")
                     
-                    # Show final status
-                    if upload_success_count > 0:
-                        if upload_success_count == len(uploaded_files):
-                            st.success(f"🎉 All {upload_success_count} files uploaded successfully!")
-                        else:
-                            st.warning(f"⚠️ {upload_success_count}/{len(uploaded_files)} files uploaded successfully")
-                        st.session_state.files_locked = True
-                        status_text.empty()
-                        time.sleep(1)  # Brief pause before rerun
-                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ Failed to upload {uploaded_file.name}: {str(e)}")
+                        logger.error(f"Upload error for {uploaded_file.name}: {str(e)}")
+                
+                # Show final status
+                if upload_success_count > 0:
+                    if upload_success_count == len(uploaded_files):
+                        st.success(f"🎉 All {upload_success_count} files uploaded successfully!")
                     else:
-                        st.error("❌ No files were uploaded successfully. Please check the error messages above.")
-                        
-                finally:
-                    for p in temp_paths:
-                        try:
-                            os.unlink(p)
-                        except: 
-                            pass
+                        st.warning(f"⚠️ {upload_success_count}/{len(uploaded_files)} files uploaded successfully")
+                    st.session_state.files_locked = True
+                    status_text.empty()
+                    time.sleep(1)  # Brief pause before rerun
+                    st.rerun()
+                else:
+                    st.error("❌ No files were uploaded successfully. Please check the error messages above.")
     else:
         if st.button("➕ Add more sources", use_container_width=True):
             upload_locked_dialog()
