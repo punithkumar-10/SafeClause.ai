@@ -14,6 +14,13 @@ import streamlit.components.v1 as components
 
 from utils.storage_service import upload_to_storj
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
 # ---------------- Configuration ----------------
 st.set_page_config(
     page_title="SafeClause.ai",
@@ -164,29 +171,51 @@ with st.sidebar:
         if uploaded_files:
             if st.button("Upload Files", use_container_width=True, type="primary"):
                 progress_bar = st.progress(0.0)
+                status_text = st.empty()
                 temp_paths = []
+                uploaded_file_names = []
+                
                 try:
+                    # Create temporary files and store original names
                     for f in uploaded_files:
                         with tempfile.NamedTemporaryFile(delete=False, suffix=Path(f.name).suffix) as tmp:
                             tmp.write(f.getbuffer())
                             temp_paths.append(tmp.name)
+                            uploaded_file_names.append(f.name)
                     
-                    for i, p in enumerate(temp_paths, 1):
+                    # Upload each file with original filename
+                    upload_success_count = 0
+                    for i, (temp_path, original_name) in enumerate(zip(temp_paths, uploaded_file_names), 1):
+                        status_text.text(f"Uploading {original_name}... ({i}/{len(temp_paths)})")
                         progress_bar.progress(i / len(temp_paths))
-                        ok, url = upload_to_storj(p)
+                        
+                        ok, result = upload_to_storj(temp_path, original_name)
                         if ok:
-                            st.session_state.docs.append({"name": Path(p).name, "url": url})
+                            st.session_state.docs.append({"name": original_name, "url": result})
+                            upload_success_count += 1
+                            st.success(f"✅ Uploaded: {original_name}")
                         else:
-                            st.error(f"Failed to upload {Path(p).name}")
+                            st.error(f"❌ Failed to upload {original_name}: {result}")
                     
-                    if st.session_state.docs:
+                    # Show final status
+                    if upload_success_count > 0:
+                        if upload_success_count == len(uploaded_files):
+                            st.success(f"🎉 All {upload_success_count} files uploaded successfully!")
+                        else:
+                            st.warning(f"⚠️ {upload_success_count}/{len(uploaded_files)} files uploaded successfully")
                         st.session_state.files_locked = True
+                        status_text.empty()
+                        time.sleep(1)  # Brief pause before rerun
                         st.rerun()
+                    else:
+                        st.error("❌ No files were uploaded successfully. Please check the error messages above.")
+                        
                 finally:
                     for p in temp_paths:
                         try:
                             os.unlink(p)
-                        except: pass
+                        except: 
+                            pass
     else:
         if st.button("➕ Add more sources", use_container_width=True):
             upload_locked_dialog()

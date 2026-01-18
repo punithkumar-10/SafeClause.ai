@@ -2,6 +2,8 @@ import logging
 from typing import Annotated
 import operator
 import asyncio
+import time
+import tiktoken
 from pydantic import BaseModel, Field
 from langgraph.types import Send
 from typing_extensions import Literal, TypedDict
@@ -32,9 +34,19 @@ TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
 AWS_ACCESS_KEY = os.getenv("AWS_ACCESS_KEY")
 AWS_SECRET_KEY = os.getenv("AWS_SECRET_KEY")
 
-# context management
-MAX_MESSAGES_TO_KEEP = 5  
-MAX_TOKENS_PER_MESSAGE = 100000
+# Token management and rate limiting
+MAX_MESSAGES_TO_KEEP = 3  # Reduced from 5
+MAX_TOKENS_PER_REQUEST = 6000  # Well under 8000 TPM limit
+MAX_CONTEXT_TOKENS = 4000  # For document context
+MAX_CHUNK_SIZE = 3000  # Reduced chunk size
+MIN_REQUEST_INTERVAL = 8  # Minimum 8 seconds between requests to stay under TPM
+LAST_REQUEST_TIME = 0
+
+# Initialize tiktoken encoder for token counting
+try:
+    ENCODER = tiktoken.encoding_for_model("gpt-3.5-turbo")  # Use compatible encoder
+except Exception:
+    ENCODER = tiktoken.get_encoding("cl100k_base")  # Fallback
 
 
 class Section(BaseModel):
@@ -69,10 +81,38 @@ TEXT_SPLITTER = None
 GRAPH = None
 
 
+def count_tokens(text: str) -> int:
+    """Count tokens in a text string using tiktoken."""
+    try:
+        return len(ENCODER.encode(text))
+    except Exception as e:
+        logger.warning(f"Token counting failed: {e}")
+        # Fallback: rough estimate (4 chars per token)
+        return len(text) // 4
+
+def truncate_by_tokens(text: str, max_tokens: int) -> str:
+    """Truncate text to fit within token limit."""
+    try:
+        tokens = ENCODER.encode(text)
+        if len(tokens) <= max_tokens:
+            return text
+        
+        truncated_tokens = tokens[:max_tokens]
+        truncated_text = ENCODER.decode(truncated_tokens)
+        logger.info(f"Truncated text from {len(tokens)} to {len(truncated_tokens)} tokens")
+        return truncated_text + "\n... [TRUNCATED DUE TO TOKEN LIMIT]"
+    except Exception as e:
+        logger.warning(f"Token truncation failed: {e}")
+        # Fallback: character-based truncation
+        char_limit = max_tokens * 4  # Rough estimate
+        if len(text) <= char_limit:
+            return text
+        return text[:char_limit] + "\n... [TRUNCATED DUE TO TOKEN LIMIT]"
+
 def trim_message_history(messages: list) -> list:
     """
     Trim message history to prevent context length exceeded errors.
-    Keeps only the last MAX_MESSAGES_TO_KEEP messages.
+    Keeps only the last MAX_MESSAGES_TO_KEEP messages and ensures token limits.
     """
     if not messages:
         return messages
@@ -80,15 +120,73 @@ def trim_message_history(messages: list) -> list:
     # Keep only the last N messages
     if len(messages) > MAX_MESSAGES_TO_KEEP:
         logger.info(f"Trimming messages from {len(messages)} to {MAX_MESSAGES_TO_KEEP}")
-        return messages[-MAX_MESSAGES_TO_KEEP:]
+        messages = messages[-MAX_MESSAGES_TO_KEEP:]
     
-    return messages
+    # Check and truncate individual messages if needed
+    trimmed_messages = []
+    total_tokens = 0
+    
+    for msg in reversed(messages):  # Process newest first
+        if isinstance(msg, dict) and "content" in msg:
+            content = msg["content"]
+        elif hasattr(msg, "content"):
+            content = msg.content
+        else:
+            content = str(msg)
+        
+        msg_tokens = count_tokens(content)
+        
+        # If adding this message would exceed limit, truncate it
+        if total_tokens + msg_tokens > MAX_CONTEXT_TOKENS:
+            remaining_tokens = MAX_CONTEXT_TOKENS - total_tokens
+            if remaining_tokens > 100:  # Only include if we have reasonable space
+                content = truncate_by_tokens(content, remaining_tokens)
+                if isinstance(msg, dict):
+                    msg = {**msg, "content": content}
+                elif hasattr(msg, "content"):
+                    msg.content = content
+                trimmed_messages.insert(0, msg)
+            break
+        else:
+            trimmed_messages.insert(0, msg)
+            total_tokens += msg_tokens
+    
+    logger.info(f"Final message history: {len(trimmed_messages)} messages, ~{total_tokens} tokens")
+    return trimmed_messages
+
+async def enforce_rate_limit():
+    """Enforce rate limiting to stay within Groq's TPM limits."""
+    global LAST_REQUEST_TIME
+    
+    current_time = time.time()
+    time_since_last = current_time - LAST_REQUEST_TIME
+    
+    if time_since_last < MIN_REQUEST_INTERVAL:
+        sleep_time = MIN_REQUEST_INTERVAL - time_since_last
+        logger.info(f"Rate limiting: sleeping for {sleep_time:.1f} seconds")
+        await asyncio.sleep(sleep_time)
+    
+    LAST_REQUEST_TIME = time.time()
+
+def prepare_safe_content(content: str, max_tokens: int = MAX_TOKENS_PER_REQUEST) -> str:
+    """Prepare content ensuring it's within token limits."""
+    token_count = count_tokens(content)
+    
+    if token_count > max_tokens:
+        logger.warning(f"Content exceeds token limit: {token_count} > {max_tokens}")
+        return truncate_by_tokens(content, max_tokens)
+    
+    return content
 
 
 def get_text_splitter():
     global TEXT_SPLITTER
     if TEXT_SPLITTER is None:
-        TEXT_SPLITTER = RecursiveCharacterTextSplitter.from_tiktoken_encoder(chunk_size=10000, chunk_overlap=200)
+        # Reduced chunk size to stay within token limits
+        TEXT_SPLITTER = RecursiveCharacterTextSplitter.from_tiktoken_encoder(
+            chunk_size=MAX_CHUNK_SIZE, 
+            chunk_overlap=100
+        )
     return TEXT_SPLITTER
 
 
@@ -206,6 +304,9 @@ async def orchestration_agent(state: State):
             "messages": [HumanMessage(content=f"Documents detected: {len(state.get('doc_contents', []))} files")]
         }
     
+    # Enforce rate limiting
+    await enforce_rate_limit()
+    
     all_tools = [retrieve_relevant_documents]
     if MCP_TOOLS:
         all_tools.extend(MCP_TOOLS)
@@ -214,76 +315,61 @@ async def orchestration_agent(state: State):
         orchestration_model,
         tools=all_tools,
         system_prompt="""
-You are an expert Indian Legal AI Agent providing accurate, practical guidance based on
-the Indian Constitution, statutory law, and judicial precedents.
+You are SafeClause.ai, an expert Indian Legal AI Agent providing accurate, practical guidance.
 
-The name which i have to this chatbot is "SafeClause.ai"
-ALWAYS TELL THAT YOU ARE SafeClause.ai NOT ChatGPT OR ANY OTHER NAME.
+Keep responses concise and under 4000 tokens. Be direct and to the point.
 
 ──────── TOOL USAGE ────────
-• VectorDB (RAG) — PRIMARY:
-  Statutes, sections, definitions, and established case law.
-• WebSearch — SECONDARY (only when required):
-  Recent judgments, amendments, notifications, repeals.
-• If sources conflict, prioritize the most recent verified information.
-  example: tavily_search(query: str, max_results=3–10), without using top_n or any other param.
+• VectorDB (RAG) — PRIMARY: Statutes, sections, definitions, case law.
+• WebSearch — SECONDARY: Recent judgments, amendments.
 
 ──────── CORE LEGAL RULES ────────
-1. Old vs New Codes:
-   If IPC, CrPC, or Evidence Act is referenced, ALWAYS provide corresponding sections
-   under BNS, BNSS, and BSA.
-2. Accuracy:
-   Cite exact Acts and section numbers; avoid assumptions and flag uncertainty.
-3. Tone:
-   Professional, neutral, precise; plain English unless legal precision is required.
+1. Old vs New Codes: Always provide BNS/BNSS/BSA equivalents for IPC/CrPC/Evidence Act.
+2. Accuracy: Cite exact Acts and sections; flag uncertainty.
+3. Tone: Professional, neutral, precise.
 
-──────── INTELLIGENT QUESTIONING ────────
-• Ask follow-up questions ONLY when:
-  – Facts are essential to give a correct legal answer, or
-  – Multiple legal outcomes depend on missing details.
-• Never ask questions for:
-  – Small talk, identity, confirmations, or obvious context.
-• When asking, ask **one clear, specific question** and explain *why* it matters.
+──────── RESPONSE STRUCTURE ────────
+1. Direct Answer
+2. Legal Provisions (Acts and sections)
+3. Case Law (if relevant)
+4. Practical Notes
+5. Disclaimer: "Information is for educational purposes only."
 
-──────── CONTEXT & MEMORY AWARENESS ────────
-• Respond naturally to greetings, names, and clarifications.
-• Do NOT apply legal framing or disclaimers to non-legal queries.
-• Switch to legal analysis mode ONLY when legal guidance is required.
-
-──────── RESPONSE STRUCTURE (LEGAL QUERIES ONLY) ────────
-1. Direct Answer — clear legal position.
-2. Legal Provisions — Acts and sections
-   (e.g., Section 302 IPC / Section 103 BNS).
-3. Case Law — landmark or recent rulings (if relevant).
-4. Practical Notes — procedures, remedies, compliance steps.
-5. Disclaimer:
-   "Information is for educational purposes and not professional legal advice."
-
-──────── IMPORTANT BEHAVIOR ────────
-• Never over-lawyer simple questions.
-• Never add disclaimers to non-legal responses.
-• Prioritize user intent, clarity, and correctness.
-
+Keep responses focused and under token limits.
 """
     )
     
-    # Trim messages to prevent context overflow
+    # Trim messages and ensure token limits
     messages = state.get("messages", [])
     messages = trim_message_history(messages)
     
+    # Prepare safe query content
+    safe_query = prepare_safe_content(state['query'], 1000)  # Limit query to 1000 tokens
+    
     if not messages:
-        messages = [{"role": "user", "content": state['query']}]
+        messages = [{"role": "user", "content": safe_query}]
     else:
-        messages.append({"role": "user", "content": state['query']})
+        messages.append({"role": "user", "content": safe_query})
     
-    result = await agent.ainvoke({"messages": messages})
-    final_answer = result["messages"][-1].content if result["messages"] else "No answer generated"
-    
-    return {
-        "has_documents": False,
-        "final_report": final_answer,
-        "messages": [HumanMessage(content=final_answer)]
-    }
+    try:
+        result = await agent.ainvoke({"messages": messages})
+        final_answer = result["messages"][-1].content if result["messages"] else "No answer generated"
+        
+        # Truncate response if needed
+        final_answer = prepare_safe_content(final_answer, MAX_TOKENS_PER_REQUEST)
+        
+        return {
+            "has_documents": False,
+            "final_report": final_answer,
+            "messages": [HumanMessage(content=final_answer)]
+        }
+    except Exception as e:
+        logger.error(f"Error in orchestration_agent: {str(e)}")
+        return {
+            "has_documents": False,
+            "final_report": f"Error processing request: {str(e)}",
+            "messages": [HumanMessage(content=f"Error: {str(e)}")]
+        }
 
 
 async def route_after_orchestration(state: State) -> Literal["chunk_document", "answer_from_cache", "END"]:
@@ -306,12 +392,14 @@ def truncate_text(text: str, max_chars: int = 25000) -> str:
 
 
 async def answer_from_cache(state: State):
+    # Enforce rate limiting
+    await enforce_rate_limit()
+    
     cached_sections = state.get("completed_sections", [])
     combined_context = "\n\n---\n\n".join(cached_sections)
     
-    # --- FIX: Truncate context to prevent Error 400 ---
-    safe_context = truncate_text(combined_context, max_chars=25000)
-    # --------------------------------------------------
+    # Use token-based truncation instead of character-based
+    safe_context = prepare_safe_content(combined_context, MAX_CONTEXT_TOKENS)
     
     doc_info = "\n".join([f"- {doc['filename']}" for doc in state.get("doc_contents", [])])
     
@@ -323,49 +411,57 @@ async def answer_from_cache(state: State):
         model,
         tools=all_tools,
         system_prompt="""
-You are an expert Indian Legal AI Agent. You provide accurate legal guidance based on the Indian Constitution, Acts, and Judicial Precedents.
-Answer the user's question based on the provided document analysis. You can also use RAG and web search if needed.
+SafeClause.ai: Indian Legal AI Agent. Keep responses under 4000 tokens.
 
-**TOOL USAGE STRATEGY**
-1. **VectorDB (RAG):** PRIMARY source for statutory text (Acts, Clauses), definitions, and historical case laws.
-2. **WebSearch:** SECONDARY source. Use strictly to find:
-   - Recent Supreme Court/High Court judgments (current year).
-   - Latest amendments or government notifications.
-   - Verification if a specific law has been repealed or updated.
-   - example: tavily_search(query: str, max_results=3–10), without using top_n or any other param.
+**TOOL USAGE**
+1. **VectorDB (RAG):** PRIMARY for Acts, sections, definitions, case law.
+2. **WebSearch:** SECONDARY for recent judgments, amendments.
 
-**CORE INSTRUCTIONS**
-1. **Old vs. New Law:** If a user asks about old codes (IPC, CrPC, Evidence Act), you MUST provide the corresponding sections in the new Sanhitas (BNS, BNSS, BSA) alongside the old ones.
-2. **Fact-Checking:** If WebSearch results (e.g., a recent amendment) contradict VectorDB data, prioritize the WebSearch result.
-3. **Tone:** Professional, neutral, and precise.
+**CORE RULES**
+1. Old vs New Law: Provide BNS/BNSS/BSA equivalents for IPC/CrPC/Evidence Act.
+2. Accuracy: Cite exact Acts and sections.
+3. Tone: Professional, concise.
 
 **RESPONSE FORMAT**
-1. **Direct Answer:** A concise summary of the legal position.
-2. **Legal Provisions:** Cite specific Acts and Sections (e.g., "Section 302 IPC / Section 103 BNS").
-3. **Case Laws:** Mention relevant landmark cases (from VectorDB) and recent rulings (from WebSearch).
-4. **Disclaimer:** "Information is for educational purposes and not professional legal advice."
-    """
+1. Direct Answer
+2. Legal Provisions (Acts and sections)
+3. Case Law (if relevant)
+4. Disclaimer: "Educational purposes only."
+
+Keep responses focused and under token limits.
+"""
     )
     
-
     messages = state.get("messages", [])
     messages = trim_message_history(messages)
     
-
-    prompt_content = f"Documents analyzed:\n{doc_info}\n\nDocument Analysis:\n{safe_context}\n\nUser Question: {state['query']}"
+    # Prepare safe prompt content
+    safe_query = prepare_safe_content(state['query'], 800)  # Limit query
+    prompt_content = f"Documents:\n{doc_info}\n\nAnalysis:\n{safe_context}\n\nQuestion: {safe_query}"
+    prompt_content = prepare_safe_content(prompt_content, MAX_CONTEXT_TOKENS)
     
     if not messages:
         messages = [{"role": "user", "content": prompt_content}]
     else:
         messages.append({"role": "user", "content": prompt_content})
     
-    result = await agent.ainvoke({"messages": messages})
-    final_answer = result["messages"][-1].content if result["messages"] else "No answer generated"
-    
-    return {
-        "final_report": final_answer,
-        "messages": [HumanMessage(content=final_answer)]
-    }
+    try:
+        result = await agent.ainvoke({"messages": messages})
+        final_answer = result["messages"][-1].content if result["messages"] else "No answer generated"
+        
+        # Truncate response if needed
+        final_answer = prepare_safe_content(final_answer, MAX_TOKENS_PER_REQUEST)
+        
+        return {
+            "final_report": final_answer,
+            "messages": [HumanMessage(content=final_answer)]
+        }
+    except Exception as e:
+        logger.error(f"Error in answer_from_cache: {str(e)}")
+        return {
+            "final_report": f"Error processing cached analysis: {str(e)}",
+            "messages": [HumanMessage(content=f"Error: {str(e)}")]
+        }
 
 
 async def chunk_document(state: State):
