@@ -34,12 +34,12 @@ TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
 AWS_ACCESS_KEY = os.getenv("AWS_ACCESS_KEY")
 AWS_SECRET_KEY = os.getenv("AWS_SECRET_KEY")
 
-# Token management and rate limiting - Optimized for safety and speed
-MAX_MESSAGES_TO_KEEP = 3  # Keep reasonable context
-MAX_TOKENS_PER_REQUEST = 7000  # Safe margin under 8000 limit per request
-MAX_CONTEXT_TOKENS = 3000  # Good context size but safe
-MAX_CHUNK_SIZE = 2500  # Reasonable chunks
-MIN_REQUEST_INTERVAL = 6  # Fast but safe intervals
+# Token management and rate limiting - VERY AGGRESSIVE to prevent 413 errors
+MAX_MESSAGES_TO_KEEP = 2  # Reduced further 
+MAX_TOKENS_PER_REQUEST = 4000  # Much more aggressive - well under 8000 limit
+MAX_CONTEXT_TOKENS = 2000  # Smaller context
+MAX_CHUNK_SIZE = 1500  # Much smaller chunks  
+MIN_REQUEST_INTERVAL = 8  # Longer intervals
 LAST_REQUEST_TIME = 0
 
 # Initialize tiktoken encoder for token counting
@@ -537,6 +537,9 @@ async def chunk_document(state: State):
 
 
 async def analyze_chunk(state: WorkerState):
+    # Enforce rate limiting
+    await enforce_rate_limit()
+    
     all_tools = [retrieve_relevant_documents]
     if MCP_TOOLS:
         all_tools.extend(MCP_TOOLS)
@@ -544,30 +547,30 @@ async def analyze_chunk(state: WorkerState):
     agent = create_agent(
         model,
         tools=all_tools,
-        system_prompt="""
-**ROLE**
-Legal Document Analyst.
-
-**TASK**
-Analyze the provided document section for legal validity, risks, and compliance.
-
-**MANDATORY TOOL PROTOCOL**
-1. **RAG:** Cross-reference the input text with stored Indian laws and standard clauses.
-2. **WebSearch:** Verify the clause's current validity against the latest amendments and judgments.
-   - example: tavily_search(query: str, max_results=3–10), without using top_n or any other param.
-
-**OUTPUT STRUCTURE**
-1. **Original Data:** [Insert the verbatim input section]
-2. **Analysis Report:** Provide a detailed breakdown of legal implications, potential loopholes, and compliance status based on insights from RAG and WebSearch.
-    """
+        system_prompt="""Legal Analyst. Analyze document section. Keep under 2000 tokens."""
     )
     
-    result = await agent.ainvoke({
-        "messages": [{"role": "user", "content": f"Section {state['section'].chunk_index}:\n{state['section'].content}\n\nAnalyze this section."}]
-    })
+    # Truncate section content to fit token limits
+    section_content = prepare_safe_content(state['section'].content, 1000)  # Much smaller
     
-    analysis = result["messages"][-1].content if result["messages"] else "No analysis generated"
-    return {"completed_sections": [analysis]}
+    prompt = f"Section {state['section'].chunk_index}:\n{section_content}\n\nAnalyze this section."
+    messages = [{"role": "user", "content": prompt}]
+    
+    # FINAL VALIDATION
+    system_prompt = "Legal Analyst. Analyze document section. Keep under 2000 tokens."
+    validated_messages = validate_total_request_size(messages, system_prompt, MAX_TOKENS_PER_REQUEST)
+    
+    try:
+        result = await agent.ainvoke({"messages": validated_messages})
+        analysis = result["messages"][-1].content if result["messages"] else "No analysis generated"
+        
+        # Truncate response
+        analysis = prepare_safe_content(analysis, 1500)  # Smaller response
+        
+        return {"completed_sections": [analysis]}
+    except Exception as e:
+        logger.error(f"Error in analyze_chunk: {str(e)}")
+        return {"completed_sections": [f"Error analyzing section: {str(e)}"]}
 
 
 async def assign_workers(state: State):
@@ -575,6 +578,9 @@ async def assign_workers(state: State):
 
 
 async def synthesizer(state: State):
+    # Enforce rate limiting
+    await enforce_rate_limit()
+    
     all_tools = [retrieve_relevant_documents]
     if MCP_TOOLS:
         all_tools.extend(MCP_TOOLS)
@@ -582,39 +588,33 @@ async def synthesizer(state: State):
     completed_sections = state["completed_sections"]
     combined_analysis = "\n\n---\n\n".join(completed_sections)
     
+    # Truncate the analysis to fit token limits
+    safe_analysis = prepare_safe_content(combined_analysis, 1500)
+    
     agent = create_agent(
         model,
         tools=all_tools,
-        system_prompt="""
-### SYSTEM PROMPT
-**TASK**
-Synthesize the provided individual section analyses into a comprehensive Final Legal Review Report.
-
-**Web Search**
-  example: tavily_search(query: str, max_results=3–10), without using top_n or any other param.
-
-**EXECUTION INSTRUCTIONS**
-For *each* section provided in the input, you must generate a structured assessment containing the following five components:
-
-1.  **Original Text:** Display the exact original clause/data.
-2.  **Risk Assessment:**
-    - **Risk Score:** Assign a score from 1 (Safe) to 10 (Critical Risk).
-    - **Justification:** Briefly explain *why* this score was assigned.
-3.  Detailed Analysis:** Synthesize the legal implications, referencing the provided analyses.
-4.  **Strategic Suggestions:** Provide specific, actionable advice on how to mitigate the identified risks.
-5.  **Refined Clause (Redline):** Rewrite the section to be legally watertight, protecting the user's interest while maintaining the original intent.
-
-**FINAL SUMMARY**
-At the end of the report, provide an **Overall Document Risk Score** (Average) and a concluding recommendation (e.g., "Safe to Sign," "Negotiation Required," "Do Not Sign").
-    """
+        system_prompt="""Synthesize legal analyses into final report. Keep under 3000 tokens."""
     )
     
-    result = await agent.ainvoke({
-        "messages": [{"role": "user", "content": f"Combine these {len(completed_sections)} analyses into a comprehensive report:\n\n{combined_analysis}"}]
-    })
+    prompt = f"Combine {len(completed_sections)} analyses:\n\n{safe_analysis}"
+    messages = [{"role": "user", "content": prompt}]
     
-    final_report = result["messages"][-1].content if result["messages"] else combined_analysis
-    return {"final_report": final_report}
+    # FINAL VALIDATION
+    system_prompt = "Synthesize legal analyses into final report. Keep under 3000 tokens."
+    validated_messages = validate_total_request_size(messages, system_prompt, MAX_TOKENS_PER_REQUEST)
+    
+    try:
+        result = await agent.ainvoke({"messages": validated_messages})
+        final_report = result["messages"][-1].content if result["messages"] else combined_analysis
+        
+        # Truncate response if needed
+        final_report = prepare_safe_content(final_report, 2500)
+        
+        return {"final_report": final_report}
+    except Exception as e:
+        logger.error(f"Error in synthesizer: {str(e)}")
+        return {"final_report": f"Error synthesizing report: {str(e)}"}
 
 
 async def build_graph():
