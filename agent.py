@@ -34,12 +34,12 @@ TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
 AWS_ACCESS_KEY = os.getenv("AWS_ACCESS_KEY")
 AWS_SECRET_KEY = os.getenv("AWS_SECRET_KEY")
 
-# Token management and rate limiting
-MAX_MESSAGES_TO_KEEP = 3  # Reduced from 5
-MAX_TOKENS_PER_REQUEST = 6000  # Well under 8000 TPM limit
-MAX_CONTEXT_TOKENS = 4000  # For document context
-MAX_CHUNK_SIZE = 3000  # Reduced chunk size
-MIN_REQUEST_INTERVAL = 8  # Minimum 8 seconds between requests to stay under TPM
+# Token management and rate limiting - Optimized for safety and speed
+MAX_MESSAGES_TO_KEEP = 3  # Keep reasonable context
+MAX_TOKENS_PER_REQUEST = 7000  # Safe margin under 8000 limit per request
+MAX_CONTEXT_TOKENS = 3000  # Good context size but safe
+MAX_CHUNK_SIZE = 2500  # Reasonable chunks
+MIN_REQUEST_INTERVAL = 6  # Fast but safe intervals
 LAST_REQUEST_TIME = 0
 
 # Initialize tiktoken encoder for token counting
@@ -177,6 +177,50 @@ def prepare_safe_content(content: str, max_tokens: int = MAX_TOKENS_PER_REQUEST)
         return truncate_by_tokens(content, max_tokens)
     
     return content
+
+def validate_total_request_size(messages: list, system_prompt: str = "", max_total_tokens: int = MAX_TOKENS_PER_REQUEST) -> list:
+    """
+    Validate and truncate the total request size to stay under token limits.
+    This is the final safety check before sending to the API.
+    """
+    # Count system prompt tokens
+    system_tokens = count_tokens(system_prompt) if system_prompt else 0
+    
+    # Count all message tokens
+    total_tokens = system_tokens
+    safe_messages = []
+    
+    logger.info(f"System prompt tokens: {system_tokens}")
+    
+    for i, msg in enumerate(messages):
+        if isinstance(msg, dict) and "content" in msg:
+            content = msg["content"]
+        elif hasattr(msg, "content"):
+            content = msg.content
+        else:
+            content = str(msg)
+        
+        msg_tokens = count_tokens(content)
+        
+        if total_tokens + msg_tokens > max_total_tokens:
+            # Truncate this message to fit
+            remaining_tokens = max_total_tokens - total_tokens
+            if remaining_tokens > 100:  # Only include if meaningful space
+                truncated_content = truncate_by_tokens(content, remaining_tokens - 50)  # Leave buffer
+                if isinstance(msg, dict):
+                    safe_msg = {**msg, "content": truncated_content}
+                else:
+                    safe_msg = {"role": "user", "content": truncated_content}
+                safe_messages.append(safe_msg)
+                total_tokens += count_tokens(truncated_content)
+                logger.warning(f"Truncated message {i} to fit token limit. Final size: {total_tokens}")
+            break
+        else:
+            safe_messages.append(msg)
+            total_tokens += msg_tokens
+    
+    logger.info(f"Final request size: {total_tokens} tokens (limit: {max_total_tokens})")
+    return safe_messages
 
 
 def get_text_splitter():
@@ -351,8 +395,12 @@ Keep responses focused and under token limits.
     else:
         messages.append({"role": "user", "content": safe_query})
     
+    # FINAL VALIDATION: Check total request size before sending
+    system_prompt = agent.runnable.get_prompts()[0].template if hasattr(agent.runnable, 'get_prompts') else ""
+    validated_messages = validate_total_request_size(messages, system_prompt, MAX_TOKENS_PER_REQUEST)
+    
     try:
-        result = await agent.ainvoke({"messages": messages})
+        result = await agent.ainvoke({"messages": validated_messages})
         final_answer = result["messages"][-1].content if result["messages"] else "No answer generated"
         
         # Truncate response if needed
@@ -445,8 +493,12 @@ Keep responses focused and under token limits.
     else:
         messages.append({"role": "user", "content": prompt_content})
     
+    # FINAL VALIDATION: Check total request size before sending
+    system_prompt = "SafeClause.ai: Indian Legal AI Agent. Keep responses under 7000 tokens."
+    validated_messages = validate_total_request_size(messages, system_prompt, MAX_TOKENS_PER_REQUEST)
+    
     try:
-        result = await agent.ainvoke({"messages": messages})
+        result = await agent.ainvoke({"messages": validated_messages})
         final_answer = result["messages"][-1].content if result["messages"] else "No answer generated"
         
         # Truncate response if needed
