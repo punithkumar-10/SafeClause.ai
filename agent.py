@@ -396,7 +396,9 @@ Keep responses focused and under token limits.
         messages.append({"role": "user", "content": safe_query})
     
     # FINAL VALIDATION: Check total request size before sending
-    system_prompt = agent.runnable.get_prompts()[0].template if hasattr(agent.runnable, 'get_prompts') else ""
+    # Use static system prompt for token counting since CompiledStateGraph doesn't have runnable.get_prompts()
+    system_prompt = """You are SafeClause.ai, an expert Indian Legal AI Agent providing accurate, practical guidance.
+Keep responses concise and under 4000 tokens. Be direct and to the point."""
     validated_messages = validate_total_request_size(messages, system_prompt, MAX_TOKENS_PER_REQUEST)
     
     try:
